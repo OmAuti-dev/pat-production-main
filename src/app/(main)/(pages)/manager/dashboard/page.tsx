@@ -13,8 +13,6 @@ import {
   Calendar,
   Activity,
   Plus,
-  Pencil,
-  Trash2
 } from 'lucide-react'
 import {
   Select,
@@ -23,8 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
 import { CreateTaskModal } from './_components/create-task-modal'
+import { EditTaskModal } from './_components/edit-task-modal'
+import { TasksTable } from './_components/tasks-table'
 import { getEmployees } from './_actions/get-employees'
 import { getProjects } from './_actions/get-projects'
 import { getTasks } from './_actions/get-tasks'
@@ -40,6 +39,8 @@ import type {
   GetTasksResponse 
 } from './types'
 import { Progress } from '@/components/ui/progress'
+import { getProjectMembers, type ProjectMember } from './actions'
+import { editTask, deleteTask, unassignTask } from './_actions/task-actions'
 
 const formatDate = (dateString: string | null | undefined) => {
   try {
@@ -78,11 +79,14 @@ const isOverdue = (dateString: string | null | undefined, completed: boolean) =>
 
 export default function ManagerDashboard() {
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false)
+  const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedProject, setSelectedProject] = useState<string>('all')
   const [isLoading, setIsLoading] = useState(true)
+  const [members, setMembers] = useState<ProjectMember[]>([])
   const router = useRouter()
 
   useEffect(() => {
@@ -114,12 +118,18 @@ export default function ManagerDashboard() {
           setTasks([])
           toast.error(tasksResult.error || 'Failed to fetch tasks')
         }
+
+        const [initialMembers] = await Promise.all([
+          getProjectMembers()
+        ])
+        setMembers(initialMembers)
       } catch (error) {
         console.error('Error fetching data:', error)
         toast.error('Failed to fetch data')
         setEmployees([])
         setProjects([])
         setTasks([])
+        setMembers([])
       } finally {
         setIsLoading(false)
       }
@@ -128,15 +138,61 @@ export default function ManagerDashboard() {
     fetchData()
   }, [])
 
-  const onTaskComplete = async (taskId: string, completed: boolean) => {
+  const handleEditTask = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId)
+    if (task) {
+      setSelectedTask(task)
+      setIsEditTaskModalOpen(true)
+    }
+  }
+
+  const handleDeleteTask = async (taskId: string) => {
     try {
       setIsLoading(true)
-      // TODO: Implement task completion API call
-      toast.success('Task status updated')
-      router.refresh()
+      const result = await deleteTask(taskId)
+      
+      if (result.success) {
+        toast.success('Task deleted successfully')
+        // Update local state
+        setTasks(tasks.filter(task => task.id !== taskId))
+      } else {
+        toast.error(result.error || 'Failed to delete task')
+      }
     } catch (error) {
-      console.error('Error updating task:', error)
-      toast.error('Failed to update task status')
+      console.error('Error deleting task:', error)
+      toast.error('Failed to delete task')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleUnassignTask = async (taskId: string) => {
+    try {
+      setIsLoading(true)
+      const result = await unassignTask(taskId)
+      
+      if (result.success && result.task) {
+        toast.success('Task unassigned successfully')
+        // Update local state
+        setTasks(tasks.map(task => 
+          task.id === taskId 
+            ? { 
+                ...task, 
+                assignedTo: {
+                  id: '',
+                  name: null,
+                  profileImage: null,
+                  role: ''
+                }
+              }
+            : task
+        ))
+      } else {
+        toast.error(result.error || 'Failed to unassign task')
+      }
+    } catch (error) {
+      console.error('Error unassigning task:', error)
+      toast.error('Failed to unassign task')
     } finally {
       setIsLoading(false)
     }
@@ -197,6 +253,16 @@ export default function ManagerDashboard() {
     return Math.round((completedTasks / projectTasks.length) * 100)
   }
 
+  const handleProjectChange = async (projectId: string) => {
+    setSelectedProject(projectId)
+    const updatedMembers = await getProjectMembers(projectId)
+    setMembers(updatedMembers)
+  }
+
+  if (isLoading) {
+    return <div>Loading...</div>
+  }
+
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-black">
       <div className="flex items-center justify-between">
@@ -251,9 +317,9 @@ export default function ManagerDashboard() {
 
       {/* Project Progress */}
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-        <Card className="bg-gray-900/90 border-gray-800">
+        <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-gray-200">
+            <CardTitle className="flex items-center gap-2">
               <FolderGit2 className="h-5 w-5" />
               Project Progress
             </CardTitle>
@@ -265,17 +331,17 @@ export default function ManagerDashboard() {
                 return (
                   <div key={project.id} className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-gray-200">{project.name}</h3>
-                      <span className="text-sm text-gray-400">{progress}%</span>
+                      <h3 className="font-medium">{project.name}</h3>
+                      <span className="text-sm text-muted-foreground">{progress}%</span>
                     </div>
                     <Progress
                       value={progress}
                       className={cn(
-                        "h-2 bg-gray-800",
+                        "h-2",
                         progress === 100 ? "[&>div]:bg-green-500" : "[&>div]:bg-blue-500"
                       )}
                     />
-                    <div className="flex justify-between text-xs text-gray-400">
+                    <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Tasks: {tasks.filter(t => t.Project.id === project.id).length}</span>
                       <span>Completed: {tasks.filter(t => t.Project.id === project.id && t.status === 'DONE').length}</span>
                     </div>
@@ -283,7 +349,7 @@ export default function ManagerDashboard() {
                 )
               })}
               {projects.length === 0 && (
-                <div className="text-center py-6 text-gray-400">
+                <div className="text-center py-6 text-muted-foreground">
                   No projects available
                 </div>
               )}
@@ -292,55 +358,50 @@ export default function ManagerDashboard() {
         </Card>
 
         {/* Team Members */}
-        <Card className="bg-gray-900/90 border-gray-800">
+        <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-gray-200">
+            <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
               Team Members
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {employees.map((employee) => {
-                const employeeTasks = tasks.filter(t => t.assignedTo.name === employee.name)
-                const completedTasks = employeeTasks.filter(t => t.status === 'DONE').length
-                const progress = employeeTasks.length > 0 
-                  ? Math.round((completedTasks / employeeTasks.length) * 100)
-                  : 0
-                
-                return (
-                  <div key={employee.clerkId} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-8 w-8 border border-gray-800">
-                          <AvatarImage src={employee.profileImage || ''} />
-                          <AvatarFallback className="bg-gray-800 text-gray-200">
-                            {employee.name?.charAt(0) || '?'}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h3 className="font-medium text-gray-200">{employee.name}</h3>
-                          <p className="text-xs text-gray-400">{employee.role}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm text-gray-400">{progress}%</span>
-                    </div>
-                    <Progress
-                      value={progress}
-                      className={cn(
-                        "h-2 bg-gray-800",
-                        progress === 100 ? "[&>div]:bg-green-500" : "[&>div]:bg-blue-500"
-                      )}
-                    />
-                    <div className="flex justify-between text-xs text-gray-400">
-                      <span>Assigned: {employeeTasks.length}</span>
-                      <span>Completed: {completedTasks}</span>
+              {members.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between space-x-4"
+                >
+                  <div className="flex items-center space-x-4">
+                    <Avatar>
+                      <AvatarImage src={member.profileImage || undefined} />
+                      <AvatarFallback>
+                        {member.name?.[0] || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium leading-none">{member.name}</p>
+                      <p className="text-sm text-muted-foreground">{member.role}</p>
                     </div>
                   </div>
-                )
-              })}
-              {employees.length === 0 && (
-                <div className="text-center py-6 text-gray-400">
+                  <div className="flex items-center space-x-4 text-sm text-muted-foreground">
+                    <div className="flex flex-col items-end">
+                      <span className="font-medium">
+                        {member.completedTasks}
+                      </span>
+                      <span>Completed</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="font-medium">
+                        {member.assignedTasks}
+                      </span>
+                      <span>Total Tasks</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {members.length === 0 && (
+                <div className="text-center py-6 text-muted-foreground">
                   No team members available
                 </div>
               )}
@@ -376,45 +437,12 @@ export default function ManagerDashboard() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-6">
-            {filteredTasks.map((task) => (
-              <div key={task.id} className="flex items-center justify-between p-4 rounded-lg border bg-card">
-                <div className="space-y-1">
-                  <h3 className="font-medium">{task.title}</h3>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>Due: {formatDate(task?.deadline)}</span>
-                    <span>•</span>
-                    <span>Priority: {task.priority || 'None'}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src="" />
-                      <AvatarFallback>
-                        {task.assignedTo?.name?.charAt(0)?.toUpperCase() || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="text-sm">
-                      <p className="font-medium">{task.assignedTo?.name || 'Unassigned'}</p>
-                      <p className="text-muted-foreground">{task.assignedTo?.role || 'No role'}</p>
-                    </div>
-                  </div>
-                  <Checkbox
-                    checked={task.completed || false}
-                    onCheckedChange={(checked) => {
-                      onTaskComplete(task.id, checked as boolean)
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-            {filteredTasks.length === 0 && (
-              <div className="text-center py-6 text-muted-foreground">
-                No tasks available
-              </div>
-            )}
-          </div>
+          <TasksTable
+            tasks={filteredTasks}
+            onEdit={handleEditTask}
+            onDelete={handleDeleteTask}
+            onUnassign={handleUnassignTask}
+          />
         </CardContent>
       </Card>
 
@@ -426,6 +454,17 @@ export default function ManagerDashboard() {
           name: emp.name || 'Unnamed Employee',
           role: emp.role
         }))}
+        projects={projects}
+      />
+
+      <EditTaskModal
+        isOpen={isEditTaskModalOpen}
+        onClose={() => {
+          setIsEditTaskModalOpen(false)
+          setSelectedTask(null)
+        }}
+        task={selectedTask}
+        employees={employees}
         projects={projects}
       />
     </div>

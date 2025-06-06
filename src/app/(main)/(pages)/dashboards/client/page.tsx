@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ProjectCard } from '@/app/(main)/(pages)/dashboards/client/_components/project-card'
-import { getDashboardData, getProjectMembers, getProjects, type ProjectMember } from './actions'
-import { ProjectMembers } from './_components/project-members'
-
-interface Project {
-  id: string
-  name: string
-}
+import { getDashboardData } from './actions'
 
 interface DashboardData {
   user: {
@@ -28,22 +22,13 @@ interface DashboardData {
 
 export default function ClientDashboard() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
-  const [members, setMembers] = useState<ProjectMember[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProjectId, setSelectedProjectId] = useState('all')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [data, initialMembers, projectsList] = await Promise.all([
-          getDashboardData(),
-          getProjectMembers(),
-          getProjects()
-        ])
+        const data = await getDashboardData()
         setDashboardData(data)
-        setMembers(initialMembers)
-        setProjects(projectsList)
       } catch (error) {
         console.error('Error loading dashboard data:', error)
       } finally {
@@ -53,12 +38,6 @@ export default function ClientDashboard() {
 
     loadData()
   }, [])
-
-  const handleProjectChange = async (projectId: string) => {
-    setSelectedProjectId(projectId)
-    const updatedMembers = await getProjectMembers(projectId)
-    setMembers(updatedMembers)
-  }
 
   if (loading) {
     return <div>Loading...</div>
@@ -90,25 +69,16 @@ export default function ClientDashboard() {
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="space-y-4">
-          <h2 className="text-2xl font-bold">Your Projects</h2>
-          <div className="grid gap-4">
-            {dashboardData.projects.map((project: any) => (
-              <ProjectCard
-                key={project.id}
-                {...project}
-              />
-            ))}
-          </div>
+      <div>
+        <h2 className="text-2xl font-bold mb-4">Your Projects</h2>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {dashboardData.projects.map((project: any) => (
+            <ProjectCard
+              key={project.id}
+              {...project}
+            />
+          ))}
         </div>
-
-        <ProjectMembers
-          members={members}
-          selectedProjectId={selectedProjectId}
-          onProjectChange={handleProjectChange}
-          projects={projects}
-        />
       </div>
     </div>
   )

@@ -183,7 +183,8 @@ export function RoleManagement() {
                       <SelectContent>
                         <SelectItem value="employee">Employee</SelectItem>
                         <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="team_leader">Team Leader</SelectItem>
+                        <SelectItem value="client">Client</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
