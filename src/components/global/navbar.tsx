@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import React from 'react'
-import { MenuIcon } from 'lucide-react'
+import { MenuIcon, Bot } from 'lucide-react'
 import { UserButton, useUser } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -20,10 +20,23 @@ const Navbar = () => {
     // Fetch user role from API
     try {
       const response = await fetch('/api/user/role')
-      const data = await response.json()
+      if (!response.ok) {
+        // If user not found or no role, redirect to default dashboard
+        router.push('/dashboard')
+        return
+      }
       
+      const data = await response.json()
       if (data.role) {
-        router.push(`/${data.role.toLowerCase()}/dashboard`)
+        // Map roles to their dashboard paths
+        const dashboardPaths: Record<string, string> = {
+          'MANAGER': '/manager/dashboard',
+          'TEAM_LEADER': '/dashboards/team-leader',
+          'EMPLOYEE': '/dashboards/employee',
+          'CLIENT': '/dashboards/client',
+          'ADMIN': '/admin/dashboard'
+        }
+        router.push(dashboardPaths[data.role] || '/dashboard')
       } else {
         router.push('/dashboard') // Fallback to default dashboard
       }
@@ -36,7 +49,10 @@ const Navbar = () => {
   return (
     <header className="fixed right-0 left-0 top-0 h-14 px-6 bg-black/40 backdrop-blur-lg z-[100] flex items-center border-b border-neutral-900 justify-between">
       <aside className="flex items-center gap-2">
-        <Link href="/" className="text-3xl font-bold">PAT</Link>
+        <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+          <Bot className="h-6 w-6" />
+          <span className="text-xl font-semibold tracking-tight">PAT</span>
+        </Link>
       </aside>
       <nav className="absolute left-[50%] top-[50%] transform translate-x-[-50%] translate-y-[-50%] hidden md:block">
         <ul className="flex items-center gap-4 list-none">

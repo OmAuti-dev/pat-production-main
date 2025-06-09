@@ -8,9 +8,16 @@
   box-sizing: border-box;
 }
 
+/* Hide scrollbar for all elements */
 *::-webkit-scrollbar {
-  display: none !important;
+  display: none;
 }
+
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
 .bg-radial-gradient {
   background-image: radial-gradient(
     circle at 10% 20%,
@@ -71,7 +78,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground min-h-screen overflow-y-auto;
   }
 }
 

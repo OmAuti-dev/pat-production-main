@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import SidebarWrapper from '@/components/sidebar'
 
 export default async function MainLayout({
@@ -21,6 +22,19 @@ export default async function MainLayout({
 
   if (!dbUser) {
     return redirect('/')
+  }
+
+  // Handle role-based redirections
+  const headersList = headers()
+  const pathname = headersList.get('x-pathname') || '/'
+  
+  if (user.id && (pathname === '/' || pathname === '')) {
+    switch (dbUser.role) {
+      case 'MANAGER':
+        return redirect('/manager/dashboard')
+      case 'TEAM_LEADER':
+        return redirect('/dashboards/team-leader')
+    }
   }
 
   return (

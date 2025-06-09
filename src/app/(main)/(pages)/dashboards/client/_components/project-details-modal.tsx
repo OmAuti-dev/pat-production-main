@@ -9,20 +9,33 @@ import { useEffect } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Star, StarIcon } from 'lucide-react'
 import { format } from 'date-fns'
+import { toast } from 'sonner'
 
 interface ProjectDetailsModalProps {
   isOpen: boolean
   onClose: () => void
   project: {
     id: string
-    title: string
-    category: string
-    description: string
+    name: string
+    description: string | null
     progress: number
     status: string
-    startDate: string
-    endDate: string
-    memberCount: number
+    startDate: Date | null
+    endDate: Date | null
+    team: {
+      members: {
+        user: {
+          id: string
+          name: string | null
+          profileImage: string | null
+          role: string
+        }
+      }[]
+    } | null
+    tasks: {
+      id: string
+      status: string
+    }[]
   }
 }
 
@@ -31,21 +44,26 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
   const [newComment, setNewComment] = useState('')
   const [rating, setRating] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+
+  const loadComments = async () => {
+    try {
+      setIsLoading(true)
+      const projectComments = await getProjectComments(project.id)
+      setComments(projectComments)
+    } catch (error) {
+      console.error('Error loading comments:', error)
+      toast.error('Failed to load comments')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (isOpen) {
       loadComments()
     }
   }, [isOpen, project.id])
-
-  const loadComments = async () => {
-    try {
-      const projectComments = await getProjectComments(project.id)
-      setComments(projectComments)
-    } catch (error) {
-      console.error('Error loading comments:', error)
-    }
-  }
 
   const handleSubmitComment = async () => {
     if (!newComment.trim()) return
@@ -56,18 +74,24 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
       setComments(prev => [comment, ...prev])
       setNewComment('')
       setRating(0)
+      toast.success('Comment added successfully')
     } catch (error) {
       console.error('Error adding comment:', error)
+      toast.error('Failed to add comment')
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  const formatDate = (date: Date | null) => {
+    return date ? format(date, 'MMM d, yyyy') : 'Not set'
+  }
+
   return (
-    <Dialog open={isOpen} onOpenChange={() => onClose()}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl bg-white dark:bg-gray-950">
         <DialogHeader>
-          <DialogTitle className="text-foreground">{project.title}</DialogTitle>
+          <DialogTitle className="text-foreground">{project.name}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -75,13 +99,13 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
           <div className="space-y-4">
             <div>
               <h3 className="font-semibold text-foreground">Project Overview</h3>
-              <p className="text-sm text-muted-foreground mt-1">{project.description}</p>
+              <p className="text-sm text-muted-foreground mt-1">{project.description || 'No description'}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <h4 className="text-sm font-medium text-foreground">Category</h4>
-                <p className="text-sm text-muted-foreground">{project.category}</p>
+                <h4 className="text-sm font-medium text-foreground">Team Members</h4>
+                <p className="text-sm text-muted-foreground">{project.team?.members.length || 0} members</p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-foreground">Status</h4>
@@ -89,18 +113,50 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
               </div>
               <div>
                 <h4 className="text-sm font-medium text-foreground">Start Date</h4>
-                <p className="text-sm text-muted-foreground">
-                  {format(new Date(project.startDate), 'MMM d, yyyy')}
-                </p>
+                <p className="text-sm text-muted-foreground">{formatDate(project.startDate)}</p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-foreground">End Date</h4>
-                <p className="text-sm text-muted-foreground">
-                  {format(new Date(project.endDate), 'MMM d, yyyy')}
-                </p>
+                <p className="text-sm text-muted-foreground">{formatDate(project.endDate)}</p>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Progress</h4>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary" 
+                    style={{ width: `${project.progress}%` }}
+                  />
+                </div>
+                <span className="text-sm text-muted-foreground">{project.progress}%</span>
               </div>
             </div>
           </div>
+
+          {/* Team Members Section */}
+          {project.team?.members.length ? (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-foreground">Team Members</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {project.team.members.map((member) => (
+                  <div key={member.user.id} className="flex items-center gap-3 p-3 rounded-lg border dark:border-gray-800">
+                    <Avatar>
+                      <AvatarImage src={member.user.profileImage || undefined} />
+                      <AvatarFallback>
+                        {member.user.name?.[0] || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-foreground">{member.user.name || 'Unnamed'}</p>
+                      <p className="text-sm text-muted-foreground">{member.user.role}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {/* Comments Section */}
           <div className="space-y-4">
@@ -134,44 +190,50 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
                   onClick={handleSubmitComment} 
                   disabled={!newComment.trim() || isSubmitting}
                 >
-                  Submit Feedback
+                  {isSubmitting ? 'Submitting...' : 'Submit Feedback'}
                 </Button>
               </div>
             </div>
 
             {/* Comments List */}
             <div className="space-y-4 mt-6">
-              {comments.map((comment) => (
-                <div key={comment.id} className="flex gap-4 p-4 rounded-lg border dark:border-gray-800 bg-card">
-                  <Avatar>
-                    <AvatarImage src={comment.user.profileImage || undefined} />
-                    <AvatarFallback>
-                      {comment.user.name?.[0] || 'U'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-foreground">{comment.user.name || 'Anonymous'}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {format(new Date(comment.createdAt), 'MMM d, yyyy')}
-                        </p>
-                      </div>
-                      {comment.rating && (
-                        <div className="flex items-center gap-1">
-                          {Array.from({ length: comment.rating }).map((_, i) => (
-                            <StarIcon
-                              key={i}
-                              className="h-4 w-4 fill-yellow-400 text-yellow-400"
-                            />
-                          ))}
+              {isLoading ? (
+                <div className="text-center text-muted-foreground">Loading comments...</div>
+              ) : comments.length > 0 ? (
+                comments.map((comment) => (
+                  <div key={comment.id} className="flex gap-4 p-4 rounded-lg border dark:border-gray-800 bg-card">
+                    <Avatar>
+                      <AvatarImage src={comment.user.profileImage || undefined} />
+                      <AvatarFallback>
+                        {comment.user.name?.[0] || 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-foreground">{comment.user.name || 'Anonymous'}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {format(new Date(comment.createdAt), 'MMM d, yyyy')}
+                          </p>
                         </div>
-                      )}
+                        {comment.rating && (
+                          <div className="flex items-center gap-1">
+                            {Array.from({ length: comment.rating }).map((_, i) => (
+                              <StarIcon
+                                key={i}
+                                className="h-4 w-4 fill-yellow-400 text-yellow-400"
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm text-foreground">{comment.content}</p>
                     </div>
-                    <p className="mt-2 text-sm text-foreground">{comment.content}</p>
                   </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <div className="text-center text-muted-foreground">No comments yet</div>
+              )}
             </div>
           </div>
         </div>

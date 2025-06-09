@@ -23,15 +23,44 @@ export async function GET() {
     const users = await db.user.findMany({
       select: {
         id: true,
+        clerkId: true,
         name: true,
         email: true,
-        role: true
+        role: true,
+        memberOfTeams: {
+          select: {
+            team: {
+              select: {
+                projects: {
+                  select: {
+                    id: true
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     })
 
-    return NextResponse.json(users)
+    // Transform the data to match the expected format
+    const formattedUsers = users.map(user => ({
+      id: user.id,
+      clerkId: user.clerkId,
+      name: user.name || '',
+      email: user.email,
+      role: user.role,
+      projects: user.memberOfTeams.flatMap(membership => 
+        membership.team.projects.map(project => project.id)
+      )
+    }))
+
+    return NextResponse.json(formattedUsers)
   } catch (error) {
     console.error('[USERS_GET]', error)
+    if (error instanceof Error) {
+      return new NextResponse(error.message, { status: 400 })
+    }
     return new NextResponse('Internal Error', { status: 500 })
   }
 } 

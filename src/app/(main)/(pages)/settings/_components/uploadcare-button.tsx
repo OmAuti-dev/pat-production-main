@@ -1,10 +1,33 @@
 'use client'
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as LR from '@uploadcare/blocks'
 import { useRouter } from 'next/navigation'
+import Script from 'next/script'
+
+interface UploadcareInfo {
+  cdnUrl: string
+  name: string
+  size: number
+  uuid: string
+  isImage: boolean
+  isStored: boolean
+  originalUrl: string
+}
+
+declare const uploadcare: {
+  Widget: (selector: string, options: {
+    publicKey: string
+    tabs: string
+    previewStep: boolean
+    crop: string
+  }) => {
+    onUploadComplete: (callback: (info: UploadcareInfo) => void) => void
+    destroy: () => void
+  }
+}
 
 type Props = {
-  onUpload: (e: string) => any
+  onUpload: (url: string) => void
 }
 
 LR.registerBlocks(LR)
@@ -14,19 +37,47 @@ const UploadCareButton = ({ onUpload }: Props) => {
   const ctxProviderRef = useRef<
     typeof LR.UploadCtxProvider.prototype & LR.UploadCtxProvider
   >(null)
+  const [isScriptLoaded, setIsScriptLoaded] = useState(false)
+  const widgetRef = useRef<ReturnType<typeof uploadcare.Widget> | null>(null)
 
   useEffect(() => {
-    const handleUpload = async (e: any) => {
-      const file = await onUpload(e.detail.cdnUrl)
-      if (file) {
-        router.refresh()
+    if (!isScriptLoaded) return
+
+    try {
+      widgetRef.current = uploadcare.Widget('#uploader', {
+      publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY || '',
+      tabs: 'file camera url',
+      previewStep: true,
+      crop: 'free',
+    })
+
+      widgetRef.current.onUploadComplete((info) => {
+      onUpload(info.cdnUrl)
+      router.refresh()
+    })
+    } catch (error) {
+      console.error('Error initializing Uploadcare widget:', error)
+    }
+
+    return () => {
+      try {
+        if (widgetRef.current) {
+          widgetRef.current.destroy()
+          widgetRef.current = null
+        }
+      } catch (error) {
+        console.error('Error destroying Uploadcare widget:', error)
       }
     }
-    ctxProviderRef.current.addEventListener('file-upload-success', handleUpload)
-  }, [])
+  }, [onUpload, router, isScriptLoaded])
 
   return (
     <div>
+      <Script
+        src="https://ucarecdn.com/libs/widget/3.x/uploadcare.full.min.js"
+        onLoad={() => setIsScriptLoaded(true)}
+      />
+      <input type="hidden" id="uploader" />
       <lr-config
         ctx-name="my-uploader"
         pubkey="a9428ff5ff90ae7a64eb"

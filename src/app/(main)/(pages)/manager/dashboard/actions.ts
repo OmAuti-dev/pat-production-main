@@ -89,19 +89,25 @@ export async function getProjectMembers(projectId?: string) {
 
   if (projectId && projectId !== 'all') {
     // Get members for a specific project
-    const projectMembers = await db.projectTeamMember.findMany({
+    const project = await db.project.findUnique({
       where: {
-        projectId,
-        project: {
-          managerId: user.id // Only get members from projects managed by this user
-        }
+        id: projectId,
+        managerId: user.id // Only get members from projects managed by this user
       },
       include: {
-        user: {
+        team: {
           include: {
-            assignedTasks: {
-              where: {
-                projectId
+            members: {
+              include: {
+                user: {
+                  include: {
+                    assignedTasks: {
+                      where: {
+                        projectId
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -109,14 +115,16 @@ export async function getProjectMembers(projectId?: string) {
       }
     })
 
-    members = projectMembers.map(pm => ({
-      id: pm.userId,
-      name: pm.user.name,
-      profileImage: pm.user.profileImage,
-      role: pm.user.role,
-      assignedTasks: pm.user.assignedTasks.length,
-      completedTasks: pm.user.assignedTasks.filter(task => task.status === 'COMPLETED').length
-    }))
+    if (project?.team) {
+      members = project.team.members.map(member => ({
+        id: member.user.clerkId,
+        name: member.user.name,
+        profileImage: member.user.profileImage,
+        role: member.user.role,
+        assignedTasks: member.user.assignedTasks.length,
+        completedTasks: member.user.assignedTasks.filter(task => task.status === 'COMPLETED').length
+      }))
+    }
   } else {
     // Get all team members from projects managed by this user
     const managedProjects = await db.project.findMany({
@@ -124,11 +132,15 @@ export async function getProjectMembers(projectId?: string) {
         managerId: user.id
       },
       include: {
-        teamMembers: {
+        team: {
           include: {
-            user: {
+            members: {
               include: {
-                assignedTasks: true
+                user: {
+                  include: {
+                    assignedTasks: true
+                  }
+                }
               }
             }
           }
@@ -140,26 +152,28 @@ export async function getProjectMembers(projectId?: string) {
     const memberMap = new Map<string, ProjectMember>()
 
     managedProjects.forEach(project => {
-      project.teamMembers.forEach(teamMember => {
-        const member = teamMember.user
-        const existingMember = memberMap.get(member.clerkId)
+      if (project.team) {
+        project.team.members.forEach(teamMember => {
+          const member = teamMember.user
+          const existingMember = memberMap.get(member.clerkId)
 
-        if (existingMember) {
-          // Update task counts for existing member
-          existingMember.assignedTasks += member.assignedTasks.length
-          existingMember.completedTasks += member.assignedTasks.filter(task => task.status === 'COMPLETED').length
-        } else {
-          // Add new member
-          memberMap.set(member.clerkId, {
-            id: member.clerkId,
-            name: member.name,
-            profileImage: member.profileImage,
-            role: member.role,
-            assignedTasks: member.assignedTasks.length,
-            completedTasks: member.assignedTasks.filter(task => task.status === 'COMPLETED').length
-          })
-        }
-      })
+          if (existingMember) {
+            // Update task counts for existing member
+            existingMember.assignedTasks += member.assignedTasks.length
+            existingMember.completedTasks += member.assignedTasks.filter(task => task.status === 'COMPLETED').length
+          } else {
+            // Add new member
+            memberMap.set(member.clerkId, {
+              id: member.clerkId,
+              name: member.name,
+              profileImage: member.profileImage,
+              role: member.role,
+              assignedTasks: member.assignedTasks.length,
+              completedTasks: member.assignedTasks.filter(task => task.status === 'COMPLETED').length
+            })
+          }
+        })
+      }
     })
 
     members = Array.from(memberMap.values())

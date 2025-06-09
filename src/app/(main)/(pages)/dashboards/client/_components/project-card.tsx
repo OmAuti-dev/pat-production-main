@@ -10,56 +10,69 @@ import { ProjectDetailsModal } from './project-details-modal'
 
 interface ProjectCardProps {
   id: string
-  title: string
-  category: string
-  description: string
+  name: string
+  description: string | null
+  status: string
+  startDate: Date | null
+  endDate: Date | null
   progress: number
-  startDate: string
-  endDate: string
-  memberCount: number
-  commentCount: number
-  status: "In Progress" | "Completed" | "On Hold"
+  team: {
+    members: {
+      user: {
+        id: string
+        name: string | null
+        profileImage: string | null
+        role: string
+      }
+    }[]
+  } | null
+  tasks: {
+    id: string
+    status: string
+  }[]
 }
 
 export function ProjectCard({
   id,
-  title,
-  category,
+  name,
   description,
   progress,
   startDate,
   endDate,
-  memberCount,
-  commentCount,
+  team,
+  tasks,
   status
 }: ProjectCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   const statusStyles = {
-    "In Progress": "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-500",
-    "Completed": "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500",
-    "On Hold": "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-500",
+    "IN_PROGRESS": "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-500",
+    "COMPLETED": "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500",
+    "ON_HOLD": "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-500",
+    "PLANNING": "bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-500"
   }
 
-  const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'MMM d, yyyy')
+  const formatDate = (date: Date | null) => {
+    return date ? format(date, 'MMM d, yyyy') : 'Not set'
   }
+
+  const memberCount = team?.members.length || 0
+  const completedTasks = tasks.filter(task => task.status === 'DONE').length
 
   return (
     <>
       <Card 
-        className="group relative overflow-hidden transition-all hover:shadow-lg hover:shadow-primary/10 cursor-pointer border dark:border-gray-800"
+        className="cursor-pointer hover:shadow-md transition-shadow"
         onClick={() => setIsModalOpen(true)}
       >
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">{category}</p>
-              <h3 className="font-semibold text-xl mt-1 text-foreground">{title}</h3>
+              <h3 className="font-semibold text-xl text-foreground">{name}</h3>
             </div>
             <span className={cn(
               "rounded-full px-2 py-1 text-xs font-medium",
-              statusStyles[status]
+              statusStyles[status as keyof typeof statusStyles] || "bg-gray-100 text-gray-700 dark:bg-gray-500/10 dark:text-gray-500"
             )}>
               {status}
             </span>
@@ -67,7 +80,7 @@ export function ProjectCard({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-            {description}
+            {description || 'No description'}
           </p>
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-muted-foreground">
@@ -84,7 +97,7 @@ export function ProjectCard({
               </div>
               <div className="flex items-center gap-1">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">{commentCount} comments</span>
+                <span className="text-muted-foreground">{completedTasks}/{tasks.length} tasks</span>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -100,14 +113,14 @@ export function ProjectCard({
         onClose={() => setIsModalOpen(false)}
         project={{
           id,
-          title,
-          category,
+          name,
           description,
           progress,
           status,
           startDate,
           endDate,
-          memberCount,
+          team,
+          tasks
         }}
       />
     </>

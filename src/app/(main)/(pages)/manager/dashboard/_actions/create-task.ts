@@ -3,13 +3,14 @@
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
 import { revalidatePath } from 'next/cache'
+import { triggerTaskCreate } from './real-time'
 
 interface CreateTaskData {
   title: string
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
-  deadline: Date
-  assignedToId: string
-  projectId: string
+  deadline: Date | null
+  assignedToId: string | null
+  projectId: string | null
 }
 
 export async function createTask(data: CreateTaskData) {
@@ -19,32 +20,28 @@ export async function createTask(data: CreateTaskData) {
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Validate user role
+    // Get the user's internal database ID
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true }
+      select: { id: true, role: true }
     })
 
     if (!dbUser || (dbUser.role !== 'MANAGER' && dbUser.role !== 'TEAM_LEADER')) {
       return { success: false, error: 'Not authorized to create tasks' }
     }
 
-    // Validate project exists
-    const project = await db.project.findUnique({
-      where: { id: data.projectId }
-    })
+    // Get the assignee's internal database ID if provided
+    let assigneeId: string | null = null
+    if (data.assignedToId) {
+      const assignee = await db.user.findUnique({
+        where: { clerkId: data.assignedToId },
+        select: { id: true }
+      })
 
-    if (!project) {
-      return { success: false, error: 'Project not found' }
-    }
-
-    // Validate assignee exists
-    const assignee = await db.user.findUnique({
-      where: { clerkId: data.assignedToId }
-    })
-
-    if (!assignee) {
-      return { success: false, error: 'Assigned user not found' }
+      if (!assignee) {
+        return { success: false, error: 'Assigned user not found' }
+      }
+      assigneeId = assignee.id
     }
 
     // Create the task
@@ -53,32 +50,65 @@ export async function createTask(data: CreateTaskData) {
         title: data.title,
         priority: data.priority,
         status: 'TODO',
-        dueDate: data.deadline,
-        assignedToId: data.assignedToId,
-        createdById: user.id,
+        deadline: data.deadline,
+        assignedToId: assigneeId,
+        creatorId: dbUser.id,
         projectId: data.projectId
       },
       include: {
         assignedTo: {
           select: {
+            id: true,
             name: true,
-            profileImage: true
+            profileImage: true,
+            role: true
           }
         },
-        Project: {
+        project: {
           select: {
+            id: true,
             name: true
           }
         }
       }
     })
 
+    // Transform task to match interface
+    const transformedTask = {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      deadline: task.deadline,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      creatorId: task.creatorId,
+      assignedToId: task.assignedToId,
+      projectId: task.projectId,
+      assignedTo: task.assignedTo ? {
+        id: task.assignedTo.id,
+        name: task.assignedTo.name,
+        profileImage: task.assignedTo.profileImage,
+        role: task.assignedTo.role
+      } : undefined,
+      project: task.project ? {
+        id: task.project.id,
+        name: task.project.name
+      } : undefined
+    }
+
+    // Trigger real-time update
+    await triggerTaskCreate(transformedTask)
+
     // Revalidate relevant paths
     revalidatePath('/manager/dashboard')
     revalidatePath('/employee/dashboard')
-    revalidatePath(`/projects/${data.projectId}`)
+    if (data.projectId) {
+      revalidatePath(`/projects/${data.projectId}`)
+    }
     
-    return { success: true, task }
+    return { success: true, task: transformedTask }
   } catch (error) {
     console.error('Error creating task:', error)
     return { 

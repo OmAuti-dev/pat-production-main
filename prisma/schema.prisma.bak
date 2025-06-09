@@ -1,0 +1,285 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TEAM_LEADER
+  EMPLOYEE
+  CLIENT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  clerkId       String    @unique
+  name          String
+  email         String    @unique
+  role          Role      @default(EMPLOYEE)
+  profileImage  String?
+  phoneNumber   String?
+  skills        String[]
+  experience    Int       @default(0)
+  resumeUrl     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Task relations
+  createdTasks  Task[]    @relation("CreatedBy")
+  assignedTasks Task[]    @relation("AssignedTo")
+  
+  // Team relations
+  memberOfTeam  Team?     @relation("TeamMembers", fields: [teamId], references: [id])
+  teamId        String?
+  leadingTeams  Team[]    @relation("TeamLead")
+  teamMembers   TeamMember[]
+  
+  // Project relations
+  managedProjects Project[] @relation("ManagedBy")
+  clientProjects  Project[] @relation("ClientOf")
+  
+  // Other fields
+  tier             String? @default("Free")
+  credits          String? @default("10")
+  localGoogleId    String? @unique
+  googleResourceId String? @unique
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("TODO")
+  priority    String   @default("MEDIUM")
+  deadline    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  createdBy   User     @relation("CreatedBy", fields: [creatorId], references: [id])
+  creatorId   String
+  assignedTo  User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String?
+  project     Project? @relation(fields: [projectId], references: [id])
+  projectId   String?
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  leader      User     @relation("TeamLead", fields: [leaderId], references: [id])
+  leaderId    String
+  members     User[]   @relation("TeamMembers")
+  teamMembers TeamMember[]
+  projects    Project[]
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  joinedAt  DateTime @default(now())
+  role      String   @default("MEMBER")
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  teamId    String
+
+  @@unique([userId, teamId])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("PLANNING")
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  manager     User     @relation("ManagedBy", fields: [managerId], references: [id])
+  managerId   String
+  client      User?    @relation("ClientOf", fields: [clientId], references: [id])
+  clientId    String?
+  team        Team?    @relation(fields: [teamId], references: [id])
+  teamId      String?
+  tasks       Task[]
+}
+
+model LocalGoogleCredential {
+  id          String @id @default(uuid())
+  accessToken String @unique
+
+  folderId   String?
+  pageToken  String?
+  channelId  String  @unique @default(uuid())
+  subscribed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id])
+}
+
+model DiscordWebhook {
+  id          String        @id @default(uuid())
+  webhookId   String        @unique
+  url         String        @unique
+  name        String
+  guildName   String
+  guildId     String
+  channelId   String        @unique
+  user        User          @relation(fields: [userId], references: [clerkId])
+  userId      String
+  connections Connections[]
+}
+
+model Slack {
+  id String @id @default(uuid())
+
+  appId            String
+  authedUserId     String
+  authedUserToken  String @unique
+  slackAccessToken String @unique
+  botUserId        String
+  teamId           String
+  teamName         String
+
+  User        User          @relation(fields: [userId], references: [clerkId])
+  userId      String
+  connections Connections[]
+}
+
+model Notion {
+  id            String        @id @default(uuid())
+  accessToken   String        @unique
+  workspaceId   String        @unique
+  databaseId    String        @unique
+  workspaceName String
+  workspaceIcon String
+  User          User          @relation(fields: [userId], references: [clerkId])
+  userId        String
+  connections   Connections[]
+}
+
+model Connections {
+  id               String          @id @default(uuid())
+  type             String          @unique
+  DiscordWebhook   DiscordWebhook? @relation(fields: [discordWebhookId], references: [id])
+  discordWebhookId String?
+  Notion           Notion?         @relation(fields: [notionId], references: [id])
+  notionId         String?
+  User             User?           @relation(fields: [userId], references: [clerkId])
+  userId           String?
+  Slack            Slack?          @relation(fields: [slackId], references: [id])
+  slackId          String?
+}
+
+model Workflows {
+  id                String   @id @default(uuid())
+  nodes             String?
+  edges             String?
+  name              String
+  discordTemplate   String?
+  notionTemplate    String?
+  slackTemplate     String?
+  slackChannels     String[]
+  slackAccessToken  String?
+  notionAccessToken String?
+  notionDbId        String?
+  flowPath          String?
+  cronPath          String?
+  publish           Boolean? @default(false)
+  description       String
+  User              User     @relation(fields: [userId], references: [clerkId])
+  userId            String
+}
+
+model ProjectTeamMember {
+  id        String   @id @default(uuid())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  user      User     @relation(fields: [userId], references: [clerkId])
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, userId])
+}
+
+model ProjectResource {
+  id        String   @id @default(uuid())
+  title     String
+  url       String
+  type      String   // "doc" or "link"
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String   @db.Text
+  rating    Int?     // Optional rating (1-5 stars)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId    String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String?
+  user      User     @relation(fields: [userId], references: [clerkId])
+  userId    String
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  startDate   DateTime
+  endDate     DateTime
+  status      String   @default("DRAFT")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+}
+
+model UserProject {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, projectId])
+}
+
+model Credential {
+  id        String   @id @default(cuid())
+  type      String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @unique
+}

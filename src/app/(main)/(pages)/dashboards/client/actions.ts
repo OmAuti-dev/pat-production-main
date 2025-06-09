@@ -52,16 +52,24 @@ export async function getProjectMembers(projectId?: string) {
 
   if (projectId && projectId !== 'all') {
     // Get members for a specific project
-    const projectMembers = await db.projectTeamMember.findMany({
+    const project = await db.project.findUnique({
       where: {
-        projectId
+        id: projectId
       },
       include: {
-        user: {
+        team: {
           include: {
-            assignedTasks: {
-              where: {
-                projectId
+            members: {
+              include: {
+                user: {
+                  include: {
+                    assignedTasks: {
+                      where: {
+                        projectId
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -69,20 +77,30 @@ export async function getProjectMembers(projectId?: string) {
       }
     })
 
-    members = projectMembers.map(pm => ({
-      id: pm.userId,
-      name: pm.user.name,
-      profileImage: pm.user.profileImage,
-      role: pm.user.role,
-      assignedTasks: pm.user.assignedTasks.length,
-      completedTasks: pm.user.assignedTasks.filter(task => task.status === 'COMPLETED').length
-    }))
+    if (project?.team) {
+      members = project.team.members.map(member => ({
+        id: member.user.clerkId,
+        name: member.user.name,
+        profileImage: member.user.profileImage,
+        role: member.user.role,
+        assignedTasks: member.user.assignedTasks.length,
+        completedTasks: member.user.assignedTasks.filter(task => task.status === 'COMPLETED').length
+      }))
+    }
   } else {
     // Get all team members across projects
     const allMembers = await db.user.findMany({
       where: {
-        projectTeamMember: {
-          some: {} // Has any project membership
+        memberOfTeams: {
+          some: {
+            team: {
+              projects: {
+                some: {
+                  clientId: user.id
+                }
+              }
+            }
+          }
         }
       },
       include: {
@@ -184,108 +202,81 @@ export async function getDashboardData() {
   const user = await currentUser()
   if (!user) throw new Error("Not authenticated")
 
-  // Get all projects for the user based on their role
+  // Get the user's internal database ID
   const dbUser = await db.user.findUnique({
     where: { clerkId: user.id },
-    select: {
+    select: { 
+      id: true,
+      name: true,
       role: true
     }
   })
 
-  if (!dbUser) throw new Error("User not found")
-
-  let projects = []
-  
-  switch (dbUser.role) {
-    case 'ADMIN':
-    case 'MANAGER':
-      // Admins and managers can see all projects
-      projects = await db.project.findMany({
-        include: {
-          teamMembers: true,
-          tasks: true,
-        }
-      })
-      break
-      
-    case 'TEAM_LEADER':
-    case 'EMPLOYEE':
-      // Team members can see projects they're assigned to
-      projects = await db.project.findMany({
-        where: {
-          teamMembers: {
-            some: {
-              userId: user.id
-            }
-          }
-        },
-        include: {
-          teamMembers: true,
-          tasks: true,
-        }
-      })
-      break
-      
-    case 'CLIENT':
-      // Clients can only see their own projects
-      projects = await db.project.findMany({
-        where: {
-          clientId: user.id
-        },
-        include: {
-          teamMembers: true,
-          tasks: true,
-        }
-      })
-      break
+  if (!dbUser || dbUser.role !== 'CLIENT') {
+    throw new Error("Not authorized to view client dashboard")
   }
 
-  // Transform projects into the format expected by the dashboard
-  const transformedProjects = projects.map(project => {
-    // Calculate project status based on progress
-    let status: ProjectStatus = "In Progress"
-    if (project.progress === 100) status = "Completed"
-    else if (project.progress === 0) status = "On Hold"
-
-    // Get the earliest and latest task dates for the project timeline
-    const taskDates = project.tasks
-      .map(task => task.dueDate)
-      .filter((date): date is Date => date !== null)
-    
-    const startDate = taskDates.length > 0 
-      ? new Date(Math.min(...taskDates.map(d => d.getTime())))
-      : project.createdAt
-    
-    const endDate = taskDates.length > 0
-      ? new Date(Math.max(...taskDates.map(d => d.getTime())))
-      : project.updatedAt
-
-    return {
-      title: project.name,
-      category: project.type,
-      description: project.description,
-      progress: project.progress,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      memberCount: project.teamMembers.length,
-      commentCount: project.tasks.length, // Using tasks count as a proxy for comments
-      status,
+  // Get all projects where the user is the client
+  const projects = await db.project.findMany({
+    where: {
+      clientId: dbUser.id
+    },
+    include: {
+      team: {
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  profileImage: true,
+                  role: true
+                }
+              }
+            }
+          }
+        }
+      },
+      tasks: true
     }
   })
 
+  // Transform projects to include progress
+  const transformedProjects = projects.map(project => {
+    const totalTasks = project.tasks.length
+    const completedTasks = project.tasks.filter(task => task.status === 'DONE').length
+    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+    return {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      status: project.status,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      progress,
+      team: project.team,
+      tasks: project.tasks
+    }
+  })
+
+  // Calculate dashboard stats
+  const stats = {
+    totalProjects: projects.length,
+    inProgressProjects: projects.filter(p => p.status === 'IN_PROGRESS').length,
+    completedProjects: projects.filter(p => p.status === 'COMPLETED').length,
+    onHoldProjects: projects.filter(p => p.status === 'ON_HOLD').length
+  }
+
   return {
     user: {
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.emailAddresses[0]?.emailAddress,
+      id: dbUser.id,
+      firstName: dbUser.name?.split(' ')[0] || null,
+      lastName: dbUser.name?.split(' ')[1] || null,
+      email: user.emailAddresses[0]?.emailAddress || null
     },
     projects: transformedProjects,
-    stats: {
-      totalProjects: projects.length,
-      inProgressProjects: projects.filter(p => p.progress > 0 && p.progress < 100).length,
-      completedProjects: projects.filter(p => p.progress === 100).length,
-      onHoldProjects: projects.filter(p => p.progress === 0).length,
-    }
+    stats
   }
 } 

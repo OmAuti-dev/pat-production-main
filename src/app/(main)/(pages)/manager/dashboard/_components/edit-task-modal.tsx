@@ -22,6 +22,7 @@ import {
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { editTask } from '../_actions/task-actions'
+import { format } from 'date-fns'
 import type { Task, Employee, Project } from '../types'
 
 interface EditTaskModalProps {
@@ -37,8 +38,8 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
   const [status, setStatus] = useState('')
   const [priority, setPriority] = useState('')
   const [deadline, setDeadline] = useState('')
-  const [assignedToId, setAssignedToId] = useState('')
-  const [projectId, setProjectId] = useState('')
+  const [assignedToId, setAssignedToId] = useState<string | null>(null)
+  const [projectId, setProjectId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const router = useRouter()
 
@@ -47,9 +48,9 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
       setTitle(task.title)
       setStatus(task.status)
       setPriority(task.priority)
-      setDeadline(task.deadline?.split('T')[0] || '')
-      setAssignedToId(task.assignedTo?.id || '')
-      setProjectId(task.Project.id)
+      setDeadline(task.deadline ? format(task.deadline, 'yyyy-MM-dd') : '')
+      setAssignedToId(task.assignedToId)
+      setProjectId(task.projectId)
     }
   }, [task])
 
@@ -64,7 +65,7 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
         title,
         status,
         priority,
-        deadline,
+        deadline: deadline ? new Date(deadline) : null,
         assignedToId,
         projectId
       })
@@ -86,7 +87,7 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px] bg-gray-900 text-gray-200 border-gray-800">
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Edit Task</DialogTitle>
         </DialogHeader>
@@ -98,14 +99,13 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Task title"
-              className="bg-gray-800 border-gray-700"
               required
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="status">Status</Label>
             <Select value={status} onValueChange={setStatus} required>
-              <SelectTrigger id="status" className="bg-gray-800 border-gray-700">
+              <SelectTrigger id="status">
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
               <SelectContent>
@@ -118,7 +118,7 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
           <div className="space-y-2">
             <Label htmlFor="priority">Priority</Label>
             <Select value={priority} onValueChange={setPriority} required>
-              <SelectTrigger id="priority" className="bg-gray-800 border-gray-700">
+              <SelectTrigger id="priority">
                 <SelectValue placeholder="Select priority" />
               </SelectTrigger>
               <SelectContent>
@@ -135,19 +135,22 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
               type="date"
               value={deadline}
               onChange={(e) => setDeadline(e.target.value)}
-              className="bg-gray-800 border-gray-700"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="assignedTo">Assigned To</Label>
-            <Select value={assignedToId} onValueChange={setAssignedToId}>
-              <SelectTrigger id="assignedTo" className="bg-gray-800 border-gray-700">
+            <Select 
+              value={assignedToId || 'unassigned'} 
+              onValueChange={(value) => setAssignedToId(value === 'unassigned' ? null : value)}
+            >
+              <SelectTrigger id="assignedTo">
                 <SelectValue placeholder="Select assignee" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
                 {employees.map((employee) => (
                   <SelectItem key={employee.id} value={employee.id}>
-                    {employee.name || 'Unnamed Employee'}
+                    {employee.name || 'Unnamed Employee'} ({employee.role})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -155,11 +158,15 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
           </div>
           <div className="space-y-2">
             <Label htmlFor="project">Project</Label>
-            <Select value={projectId} onValueChange={setProjectId} required>
-              <SelectTrigger id="project" className="bg-gray-800 border-gray-700">
+            <Select 
+              value={projectId || 'no-project'} 
+              onValueChange={(value) => setProjectId(value === 'no-project' ? null : value)}
+            >
+              <SelectTrigger id="project">
                 <SelectValue placeholder="Select project" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="no-project">No Project</SelectItem>
                 {projects.map((project) => (
                   <SelectItem key={project.id} value={project.id}>
                     {project.name}
@@ -173,14 +180,12 @@ export function EditTaskModal({ isOpen, onClose, task, employees, projects }: Ed
               type="button"
               variant="outline"
               onClick={onClose}
-              className="bg-gray-800 border-gray-700 hover:bg-gray-700"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-blue-600 hover:bg-blue-500"
             >
               {isSubmitting ? (
                 <>

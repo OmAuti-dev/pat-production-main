@@ -9,13 +9,10 @@ import { Prisma } from "@prisma/client"
 type CreateProjectData = {
   name: string
   description: string
-  type: string
+  status: string
   clientId: string
-  resources?: {
-    title: string
-    url: string
-    type: string
-  }[]
+  startDate?: Date | null
+  endDate?: Date | null
 }
 
 type Client = {
@@ -41,58 +38,23 @@ type TaskWithProject = {
   Project: ProjectWithClient
 }
 
-type ProjectTeamMemberSelect = Prisma.ProjectGetPayload<{
-  select: {
-    teamMembers: {
-      select: {
-        user: {
-          select: {
-            clerkId: true
-            name: true
-            profileImage: true
-          }
-        }
-      }
-    }
-  }
-}>
-
-type TeamMemberWithUser = Prisma.ProjectTeamMemberGetPayload<{
-  select: {
-    user: {
-      select: {
-        clerkId: true
-        name: true
-        profileImage: true
-      }
-    }
-  }
-}>
-
 type ProjectEmployee = {
   clerkId: string
   name: string | null
   profileImage: string | null
 }
 
-type ProjectWithTeamMembers = Prisma.ProjectGetPayload<{
-  include: {
-    teamMembers: {
-      include: {
-        user: {
-          select: {
-            clerkId: true
-            name: true
-            profileImage: true
-          }
-        }
-      }
-    }
-  }
-}>
-
 type DbUser = {
   role: Role
+}
+
+interface UpdateProjectData {
+  name: string
+  description: string
+  type: string
+  progress: number
+  status: string
+  clientId?: string
 }
 
 export async function createProject(data: CreateProjectData) {
@@ -100,46 +62,62 @@ export async function createProject(data: CreateProjectData) {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
-    // Get the current user's role
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true }
+      select: { id: true, role: true }
     })
 
     if (!dbUser || dbUser.role !== 'MANAGER') {
       throw new Error('Not authorized to create projects')
     }
 
+    // Get the client's internal database ID
+    const client = await db.user.findUnique({
+      where: { clerkId: data.clientId },
+      select: { id: true }
+    })
+
+    if (!client) throw new Error('Client not found')
+
+    // Create a new team for the project
+    const team = await db.team.create({
+      data: {
+        name: `${data.name} Team`,
+        leader: {
+          connect: {
+            id: dbUser.id
+          }
+        }
+      }
+    })
+
     // Create the project
     const project = await db.project.create({
       data: {
         name: data.name,
         description: data.description,
-        type: data.type,
-        clientId: data.clientId,
-        managerId: user.id, // Current user (manager) becomes the project manager
-        resources: {
-          create: data.resources?.map(resource => ({
-            title: resource.title,
-            url: resource.url,
-            type: resource.type
-          })) || []
+        status: data.status,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        team: {
+          connect: {
+            id: team.id
+          }
+        },
+        manager: {
+          connect: {
+            id: dbUser.id
+          }
+        },
+        client: {
+          connect: {
+            id: client.id
+          }
         }
       }
     })
 
-    // Optionally, add the manager as a team member
-    await db.projectTeamMember.create({
-      data: {
-        projectId: project.id,
-        userId: user.id
-      }
-    })
-
-    // Revalidate both the projects page and dashboard
     revalidatePath('/projects')
-    revalidatePath('/dashboard')
-
     return project
   } catch (error) {
     console.error('Error creating project:', error)
@@ -154,18 +132,19 @@ export async function getProjects() {
 
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true, name: true }
+      select: { role: true }
     })
 
     if (!dbUser) throw new Error('User not found')
 
-    let projects;
     switch (dbUser.role) {
       case 'MANAGER':
         // Managers can see all projects they manage
-        projects = await db.project.findMany({
+        return await db.project.findMany({
           where: {
-            managerId: user.id
+            manager: {
+              clerkId: user.id
+            }
           },
           include: {
             client: {
@@ -175,30 +154,24 @@ export async function getProjects() {
             }
           }
         })
-        return projects.map((project) => ({
-          id: project.id,
-          name: project.name,
-          description: project.description,
-          type: project.type,
-          progress: project.progress,
-          client: {
-            name: project.client.name || 'Unnamed Client'
-          }
-        }))
-      
+
       case 'TEAM_LEADER':
       case 'EMPLOYEE':
         // Team leaders and employees can see projects they're assigned to
         const userWithTeamMemberships = await db.user.findUnique({
           where: { clerkId: user.id },
           include: {
-            projectTeamMember: {
+            memberOfTeams: {
               include: {
-                project: {
+                team: {
                   include: {
-                    client: {
-                      select: {
-                        name: true
+                    projects: {
+                      include: {
+                        client: {
+                          select: {
+                            name: true
+                          }
+                        }
                       }
                     }
                   }
@@ -210,35 +183,23 @@ export async function getProjects() {
         
         if (!userWithTeamMemberships) throw new Error('User not found')
         
-        return userWithTeamMemberships.projectTeamMember.map(ptm => ({
-          id: ptm.project.id,
-          name: ptm.project.name,
-          description: ptm.project.description,
-          type: ptm.project.type,
-          progress: ptm.project.progress,
-          client: {
-            name: ptm.project.client?.name || 'Unnamed Client'
-          }
-        }))
+        // Flatten projects from all teams
+        const projects = userWithTeamMemberships.memberOfTeams.flatMap(membership => 
+          membership.team.projects
+        )
+
+        // Remove duplicates
+        return Array.from(new Map(projects.map(project => [project.id, project])).values())
 
       case 'CLIENT':
         // Clients can only see their own projects
-        const clientProjects = await db.project.findMany({
+        return await db.project.findMany({
           where: {
-            clientId: user.id
+            client: {
+              clerkId: user.id
+            }
           }
         })
-        
-        return clientProjects.map(project => ({
-          id: project.id,
-          name: project.name,
-          description: project.description,
-          type: project.type,
-          progress: project.progress,
-          client: {
-            name: dbUser.name || 'Unnamed Client'
-          }
-        }))
 
       default:
         throw new Error('Invalid role')
@@ -254,6 +215,15 @@ export async function getClients() {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id },
+      select: { role: true }
+    })
+
+    if (!dbUser || dbUser.role !== 'MANAGER') {
+      throw new Error('Not authorized to view clients')
+    }
+
     const clients = await db.user.findMany({
       where: {
         role: 'CLIENT'
@@ -264,126 +234,148 @@ export async function getClients() {
       }
     })
 
-    return clients.map((client: Client) => ({
-      id: client.clerkId,
-      name: client.name || 'Unnamed Client'
-    }))
+    return clients
   } catch (error) {
     console.error('Error fetching clients:', error)
     throw error
   }
 }
 
-export async function getProjectEmployees(projectId: string): Promise<ProjectEmployee[]> {
+export async function getProjectEmployees(projectId: string) {
   try {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
     const project = await db.project.findUnique({
-      where: { id: projectId }
-    })
-
-    if (!project) {
-      throw new Error('Project not found')
-    }
-
-    const teamMembers = await db.projectTeamMember.findMany({
-      where: {
-        projectId
-      },
-      select: {
-        user: {
-          select: {
-            clerkId: true,
-            name: true,
-            profileImage: true
+      where: { id: projectId },
+      include: {
+        team: {
+          include: {
+            members: {
+              include: {
+                user: {
+                  select: {
+                    clerkId: true,
+                    name: true,
+                    profileImage: true
+                  }
+                }
+              }
+            }
           }
         }
       }
     })
 
-    return teamMembers.map(member => ({
+    if (!project) throw new Error('Project not found')
+
+    return project.team?.members.map(member => ({
       clerkId: member.user.clerkId,
       name: member.user.name,
       profileImage: member.user.profileImage
-    }))
+    })) || []
   } catch (error) {
     console.error('Error fetching project employees:', error)
-    return []
+    throw error
   }
 }
 
-export async function addEmployeeToProject(projectId: string, employeeId: string): Promise<ProjectEmployee[]> {
+export async function addEmployeeToProject(projectId: string, employeeClerkId: string) {
   try {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
-    // Get the current user's role
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
       select: { role: true }
     })
 
     if (!dbUser || (dbUser.role !== 'MANAGER' && dbUser.role !== 'TEAM_LEADER')) {
-      throw new Error('Not authorized to add employees to projects')
+      throw new Error('Not authorized to add team members')
     }
 
-    // First check if the project exists
+    // Get the project and its team
     const project = await db.project.findUnique({
-      where: { id: projectId }
-    })
-
-    if (!project) {
-      throw new Error('Project not found')
-    }
-
-    // Check if the employee exists and ensure we're using their clerkId
-    const employee = await db.user.findUnique({
-      where: { clerkId: employeeId }
-    })
-
-    if (!employee) {
-      throw new Error('Employee not found in the system')
-    }
-
-    // Add employee to project using Prisma create with the correct clerkId
-    await db.projectTeamMember.create({
-      data: {
-        projectId,
-        userId: employee.clerkId // Use the clerkId from the found employee
+      where: { id: projectId },
+      include: {
+        team: true
       }
     })
 
-    // Get updated team members
-    const teamMembers = await db.projectTeamMember.findMany({
+    if (!project || !project.team) throw new Error('Project or team not found')
+
+    // Get the employee's internal database ID
+    const employee = await db.user.findUnique({
+      where: { clerkId: employeeClerkId },
+      select: { id: true }
+    })
+
+    if (!employee) throw new Error('Employee not found')
+
+    // Check if the employee is already a member of the team
+    const existingMember = await db.teamMember.findUnique({
       where: {
-        projectId
-      },
-      select: {
-        user: {
-          select: {
-            clerkId: true,
-            name: true,
-            profileImage: true
-          }
+        userId_teamId: {
+          userId: employee.id,
+          teamId: project.team.id
         }
       }
     })
 
-    // Map the results to match ProjectEmployee type
-    const formattedTeamMembers: ProjectEmployee[] = teamMembers.map(member => ({
-      clerkId: member.user.clerkId,
-      name: member.user.name,
-      profileImage: member.user.profileImage
-    }))
+    if (existingMember) {
+      throw new Error('Employee is already a member of this team')
+    }
 
-    // Revalidate the projects page to show updated data
+    // Create the team member
+    await db.teamMember.create({
+      data: {
+        teamId: project.team.id,
+        userId: employee.id
+      }
+    })
+
     revalidatePath('/projects')
-    revalidatePath(`/projects/${projectId}`)
-
-    return formattedTeamMembers
   } catch (error) {
     console.error('Error adding employee to project:', error)
+    throw error
+  }
+}
+
+export async function updateProject(projectId: string, data: {
+  name: string
+  description: string | null
+  status: string
+  startDate: Date | null
+  endDate: Date | null
+}) {
+  try {
+    const user = await currentUser()
+    if (!user) throw new Error('Not authenticated')
+
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id },
+      select: { role: true }
+    })
+
+    if (!dbUser || (dbUser.role !== 'MANAGER' && dbUser.role !== 'TEAM_LEADER')) {
+      throw new Error('Not authorized to update project')
+    }
+
+    const project = await db.project.update({
+      where: { id: projectId },
+      data: {
+        name: data.name,
+        description: data.description,
+        status: data.status,
+        startDate: data.startDate,
+        endDate: data.endDate
+      }
+    })
+
+    revalidatePath('/projects')
+    return project
+  } catch (error) {
+    console.error('Error updating project:', error)
     throw error
   }
 } 

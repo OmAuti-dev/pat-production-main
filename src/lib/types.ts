@@ -4,6 +4,9 @@ import { z } from 'zod'
 export const EditUserProfileSchema = z.object({
   email: z.string().email('Required'),
   name: z.string().min(1, 'Required'),
+  skills: z.array(z.string()).min(1, 'At least one skill is required'),
+  phoneNumber: z.string().optional(),
+  resumeUrl: z.string().optional()
 })
 
 export const WorkflowFormSchema = z.object({

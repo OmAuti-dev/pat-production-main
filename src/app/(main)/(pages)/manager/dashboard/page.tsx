@@ -41,6 +41,7 @@ import type {
 import { Progress } from '@/components/ui/progress'
 import { getProjectMembers, type ProjectMember } from './actions'
 import { editTask, deleteTask, unassignTask } from './_actions/task-actions'
+import { useRealTime } from '@/hooks/use-real-time'
 
 const formatDate = (dateString: string | null | undefined) => {
   try {
@@ -53,26 +54,23 @@ const formatDate = (dateString: string | null | undefined) => {
 }
 
 const isToday = (dateString: string | null | undefined) => {
+  if (!dateString) return false
   try {
-    if (!dateString) return false
     const date = parseISO(dateString)
-    if (!isValid(date)) return false
     const today = new Date()
-    return date.getDate() === today.getDate() &&
-      date.getMonth() === today.getMonth() &&
-      date.getFullYear() === today.getFullYear()
-  } catch (error) {
+    return date.toDateString() === today.toDateString()
+  } catch {
     return false
   }
 }
 
 const isOverdue = (dateString: string | null | undefined, completed: boolean) => {
+  if (!dateString || completed) return false
   try {
-    if (!dateString || completed) return false
     const date = parseISO(dateString)
-    if (!isValid(date)) return false
-    return date < new Date()
-  } catch (error) {
+    const today = new Date()
+    return date < today
+  } catch {
     return false
   }
 }
@@ -88,6 +86,16 @@ export default function ManagerDashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const router = useRouter()
+
+  // Initialize real-time updates
+  useRealTime({
+    projects,
+    tasks,
+    members,
+    setProjects,
+    setTasks,
+    setMembers,
+  })
 
   useEffect(() => {
     const fetchData = async () => {
@@ -123,14 +131,10 @@ export default function ManagerDashboard() {
           getProjectMembers()
         ])
         setMembers(initialMembers)
+        setIsLoading(false)
       } catch (error) {
         console.error('Error fetching data:', error)
-        toast.error('Failed to fetch data')
-        setEmployees([])
-        setProjects([])
-        setTasks([])
-        setMembers([])
-      } finally {
+        toast.error('Failed to fetch dashboard data')
         setIsLoading(false)
       }
     }
@@ -148,79 +152,65 @@ export default function ManagerDashboard() {
 
   const handleDeleteTask = async (taskId: string) => {
     try {
-      setIsLoading(true)
-      const result = await deleteTask(taskId)
-      
-      if (result.success) {
-        toast.success('Task deleted successfully')
-        // Update local state
-        setTasks(tasks.filter(task => task.id !== taskId))
-      } else {
-        toast.error(result.error || 'Failed to delete task')
-      }
+      await deleteTask(taskId)
+      setTasks(prev => prev.filter(t => t.id !== taskId))
+      toast.success('Task deleted successfully')
     } catch (error) {
-      console.error('Error deleting task:', error)
       toast.error('Failed to delete task')
-    } finally {
-      setIsLoading(false)
     }
   }
 
   const handleUnassignTask = async (taskId: string) => {
     try {
-      setIsLoading(true)
-      const result = await unassignTask(taskId)
-      
-      if (result.success && result.task) {
-        toast.success('Task unassigned successfully')
-        // Update local state
-        setTasks(tasks.map(task => 
-          task.id === taskId 
-            ? { 
-                ...task, 
-                assignedTo: {
-                  id: '',
-                  name: null,
-                  profileImage: null,
-                  role: ''
-                }
-              }
-            : task
-        ))
-      } else {
-        toast.error(result.error || 'Failed to unassign task')
-      }
+      await unassignTask(taskId)
+      setTasks(prev => prev.map(t => {
+        if (t.id === taskId) {
+          const { assignedTo, ...rest } = t
+          return rest
+        }
+        return t
+      }))
+      toast.success('Task unassigned successfully')
     } catch (error) {
-      console.error('Error unassigning task:', error)
       toast.error('Failed to unassign task')
-    } finally {
-      setIsLoading(false)
     }
+  }
+
+  const formatDateForInput = (date: Date | null) => {
+    if (!date) return ''
+    return format(date, 'yyyy-MM-dd')
   }
 
   const filteredTasks = tasks.filter(task => 
     selectedProject === 'all' || task.projectId === selectedProject
   )
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'IN_PROGRESS':
-        return 'bg-blue-500/20 text-blue-500'
-      case 'DONE':
-        return 'bg-green-500/20 text-green-500'
-      default:
-        return 'bg-yellow-500/20 text-yellow-500'
+  const calculateProjectProgress = (projectId: string) => {
+    const project = projects.find(p => p.id === projectId)
+    return project?.progress || 0
+  }
+
+  const isTaskDueToday = (task: Task) => {
+    if (!task.deadline) return false
+    try {
+      const deadline = new Date(task.deadline)
+      const today = new Date()
+      return deadline.toDateString() === today.toDateString()
+    } catch (error) {
+      console.error('Error parsing deadline:', error)
+      return false
     }
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'HIGH':
-        return 'bg-red-500/20 text-red-500'
-      case 'MEDIUM':
-        return 'bg-yellow-500/20 text-yellow-500'
-      default:
-        return 'bg-green-500/20 text-green-500'
+  const isTaskOverdue = (task: Task) => {
+    if (!task.deadline || task.status === 'DONE') return false
+    try {
+      const deadline = new Date(task.deadline)
+      const today = new Date()
+      return deadline < today
+    } catch (error) {
+      console.error('Error parsing deadline:', error)
+      return false
     }
   }
 
@@ -228,30 +218,22 @@ export default function ManagerDashboard() {
     {
       title: "Total Tasks",
       value: tasks.length,
-      description: `${tasks.filter(t => t.completed).length} completed`,
+      description: `${tasks.filter(t => t.status === 'DONE').length} completed`,
       icon: CheckCircle
     },
     {
       title: "Due Today",
-      value: tasks.filter(task => isToday(task?.deadline)).length,
+      value: tasks.filter(isTaskDueToday).length,
       description: "Tasks due today",
       icon: Calendar
     },
     {
       title: "Overdue",
-      value: tasks.filter(task => isOverdue(task?.deadline, task?.completed || false)).length,
+      value: tasks.filter(isTaskOverdue).length,
       description: "Tasks past deadline",
       icon: AlertCircle
     }
   ]
-
-  const calculateProjectProgress = (projectId: string) => {
-    const projectTasks = tasks.filter(task => task.Project.id === projectId)
-    if (projectTasks.length === 0) return 0
-    
-    const completedTasks = projectTasks.filter(task => task.status === 'DONE').length
-    return Math.round((completedTasks / projectTasks.length) * 100)
-  }
 
   const handleProjectChange = async (projectId: string) => {
     setSelectedProject(projectId)
@@ -264,43 +246,10 @@ export default function ManagerDashboard() {
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-black">
-      <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold tracking-tight text-white">Dashboard</h2>
-        <div className="flex items-center gap-2">
-          {isLoading ? (
-            <Button disabled className="bg-gray-800 text-gray-400">
-              <span className="animate-spin mr-2">⌛</span>
-              Loading...
-            </Button>
-          ) : employees.length === 0 || projects.length === 0 ? (
-            <Button
-              disabled
-              title={`Cannot create task: ${employees.length === 0 ? 'No employees available' : 'No projects available'}`}
-              className="bg-gray-800 text-gray-400"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Create Task
-            </Button>
-          ) : (
-            <Button 
-              onClick={() => setIsCreateTaskModalOpen(true)}
-              className="bg-gray-800 hover:bg-gray-700 text-white"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Create Task
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Stats Grid */}
+    <div className="p-8 space-y-8">
       <div className="grid gap-4 md:grid-cols-3">
         {stats.map((stat, index) => (
-          <Card 
-            key={index} 
-            className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5"
-          >
+          <Card key={index}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
                 {stat.title}
@@ -315,9 +264,10 @@ export default function ManagerDashboard() {
         ))}
       </div>
 
-      {/* Project Progress */}
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-        <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
+      {/* Project Progress and Team Members in one row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Project Progress */}
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FolderGit2 className="h-5 w-5" />
@@ -328,112 +278,169 @@ export default function ManagerDashboard() {
             <div className="space-y-6">
               {projects.map((project) => {
                 const progress = calculateProjectProgress(project.id)
+                const teamMembers = project.team?.members || []
                 return (
                   <div key={project.id} className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-medium">{project.name}</h3>
-                      <span className="text-sm text-muted-foreground">{progress}%</span>
+                      <div>
+                        <p className="font-medium">{project.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {teamMembers.length} team members
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-2">
+                          {teamMembers.slice(0, 3).map((member) => (
+                            <Avatar key={member.user.clerkId} className="border-2 border-background">
+                              <AvatarImage src={member.user.profileImage || ""} />
+                              <AvatarFallback>
+                                {member.user.name?.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          ))}
+                          {teamMembers.length > 3 && (
+                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm">
+                              +{teamMembers.length - 3}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <Progress
-                      value={progress}
-                      className={cn(
-                        "h-2",
-                        progress === 100 ? "[&>div]:bg-green-500" : "[&>div]:bg-blue-500"
-                      )}
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Tasks: {tasks.filter(t => t.Project.id === project.id).length}</span>
-                      <span>Completed: {tasks.filter(t => t.Project.id === project.id && t.status === 'DONE').length}</span>
+                    <Progress value={progress} className="h-2" />
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>{progress}% complete</span>
+                      <span>{project.status}</span>
                     </div>
                   </div>
                 )
               })}
-              {projects.length === 0 && (
-                <div className="text-center py-6 text-muted-foreground">
-                  No projects available
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Team Members */}
-        <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
+        {/* Project Members */}
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
-              Team Members
+              Project Members
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-6">
-              {members.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between space-x-4"
-                >
-                  <div className="flex items-center space-x-4">
-                    <Avatar>
-                      <AvatarImage src={member.profileImage || undefined} />
-                      <AvatarFallback>
-                        {member.name?.[0] || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="text-sm font-medium leading-none">{member.name}</p>
-                      <p className="text-sm text-muted-foreground">{member.role}</p>
+            <div className="space-y-4">
+              <Select value={selectedProject} onValueChange={handleProjectChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a project" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all-projects">All Projects</SelectItem>
+                  {projects.map((project) => (
+                    project.id ? (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ) : null
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="space-y-4">
+                {selectedProject === 'all-projects' ? (
+                  // Show all unique members across all projects
+                  projects.flatMap(project => project.team?.members || [])
+                    .filter((member, index, self) => 
+                      index === self.findIndex(m => m.user.clerkId === member.user.clerkId)
+                    )
+                    .map((member) => {
+                      const assignedTasks = member.user.assignedTasks.length
+                      const completedTasks = member.user.assignedTasks.filter(task => task.status === 'DONE').length
+                      return (
+                        <div
+                          key={member.user.clerkId}
+                          className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Avatar>
+                              <AvatarImage src={member.user.profileImage || ""} />
+                              <AvatarFallback>
+                                {member.user.name?.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium">{member.user.name}</p>
+                              <p className="text-sm text-muted-foreground">{member.user.role}</p>
+                            </div>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            <p>{completedTasks}/{assignedTasks} tasks</p>
+                          </div>
+                        </div>
+                      )
+                    })
+                ) : (
+                  // Show members of the selected project
+                  projects.find(p => p.id === selectedProject)?.team?.members.map((member) => {
+                    const assignedTasks = member.user.assignedTasks.length
+                    const completedTasks = member.user.assignedTasks.filter(task => task.status === 'DONE').length
+                    return (
+                      <div
+                        key={member.user.clerkId}
+                        className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Avatar>
+                            <AvatarImage src={member.user.profileImage || ""} />
+                            <AvatarFallback>
+                              {member.user.name?.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-medium">{member.user.name}</p>
+                            <p className="text-sm text-muted-foreground">{member.user.role}</p>
+                          </div>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          <p>{completedTasks}/{assignedTasks} tasks</p>
+                        </div>
+                      </div>
+                    )
+                  }) || (
+                    <div className="text-center text-muted-foreground">
+                      No members in this project
                     </div>
-                  </div>
-                  <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                    <div className="flex flex-col items-end">
-                      <span className="font-medium">
-                        {member.completedTasks}
-                      </span>
-                      <span>Completed</span>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <span className="font-medium">
-                        {member.assignedTasks}
-                      </span>
-                      <span>Total Tasks</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {members.length === 0 && (
-                <div className="text-center py-6 text-muted-foreground">
-                  No team members available
-                </div>
-              )}
+                  )
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Tasks Table */}
-      <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Tasks</CardTitle>
-            <Select
-              value={selectedProject}
-              onValueChange={setSelectedProject}
-            >
-              <SelectTrigger className="w-[180px]">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Tasks
+          </CardTitle>
+          <div className="flex items-center gap-4">
+            <Select value={selectedProject} onValueChange={handleProjectChange}>
+              <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Filter by project" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Projects</SelectItem>
                 {projects.map((project) => (
-                  <SelectItem 
-                    key={project.id} 
-                    value={project.id}
-                  >
+                  <SelectItem key={project.id} value={project.id}>
                     {project.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Button onClick={() => setIsCreateTaskModalOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Task
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -449,24 +456,22 @@ export default function ManagerDashboard() {
       <CreateTaskModal
         isOpen={isCreateTaskModalOpen}
         onClose={() => setIsCreateTaskModalOpen(false)}
-        employees={employees.map(emp => ({
-          id: emp.clerkId,
-          name: emp.name || 'Unnamed Employee',
-          role: emp.role
-        }))}
-        projects={projects}
-      />
-
-      <EditTaskModal
-        isOpen={isEditTaskModalOpen}
-        onClose={() => {
-          setIsEditTaskModalOpen(false)
-          setSelectedTask(null)
-        }}
-        task={selectedTask}
         employees={employees}
         projects={projects}
       />
+
+      {selectedTask && (
+        <EditTaskModal
+          isOpen={isEditTaskModalOpen}
+          onClose={() => {
+            setIsEditTaskModalOpen(false)
+            setSelectedTask(null)
+          }}
+          task={selectedTask}
+          employees={employees}
+          projects={projects}
+        />
+      )}
     </div>
   )
 } 

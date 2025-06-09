@@ -1,36 +1,62 @@
+import { Project as BaseProject, Task as BaseTask } from '@/types'
+import type { Role } from '@prisma/client'
+
 export interface Employee {
   id: string
   clerkId: string
   name: string | null
-  role: string
   profileImage: string | null
+  role: Role
 }
 
-export interface Project {
+export interface Project extends BaseProject {
   id: string
   name: string
-}
-
-export interface Task {
-  id: string
-  title: string
   status: string
-  priority: string
-  deadline: string
-  completed: boolean
-  projectId: string
-  Project: {
+  description: string | null
+  startDate: Date | null
+  endDate: Date | null
+  team?: {
     id: string
     name: string
+    members: Array<{
+      user: {
+        clerkId: string
+        name: string | null
+        profileImage: string | null
+        role: string
+        assignedTasks: Array<{
+          id: string
+          status: string
+        }>
+      }
+    }>
   }
-  assignedTo: {
+  progress: number
+}
+
+export interface Task extends BaseTask {
+  id: string
+  title: string
+  description: string | null
+  status: 'TODO' | 'IN_PROGRESS' | 'DONE'
+  priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  deadline: Date | null
+  createdAt: Date
+  updatedAt: Date
+  creatorId: string
+  assignedToId: string | null
+  projectId: string | null
+  assignedTo?: {
     id: string
     name: string | null
     profileImage: string | null
     role: string
   }
-  createdAt: string
-  updatedAt: string
+  project?: {
+    id: string
+    name: string
+  }
 }
 
 export interface GetEmployeesResponse {
@@ -74,14 +100,8 @@ export type TaskWithRelations = {
 }
 
 export interface DashboardData {
-  projects: Array<{
-    id: string
-    name: string
-    description: string
-    type: string
-    progress: number
-  }>
-  tasks: TaskWithRelations[]
+  projects: Project[]
+  tasks: Task[]
   campaigns: Array<{
     id: string
     name: string

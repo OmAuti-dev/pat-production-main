@@ -22,7 +22,7 @@ export const getGoogleListener = async () => {
 
 export const onFlowPublish = async (workflowId: string, state: boolean) => {
   console.log(state)
-  const published = await db.workflows.update({
+  const published = await db.workflow.update({
     where: {
       id: workflowId,
     },
@@ -44,7 +44,7 @@ export const onCreateNodeTemplate = async (
   notionDbId?: string
 ) => {
   if (type === 'Discord') {
-    const response = await db.workflows.update({
+    const response = await db.workflow.update({
       where: {
         id: workflowId,
       },
@@ -58,7 +58,7 @@ export const onCreateNodeTemplate = async (
     }
   }
   if (type === 'Slack') {
-    const response = await db.workflows.update({
+    const response = await db.workflow.update({
       where: {
         id: workflowId,
       },
@@ -69,7 +69,7 @@ export const onCreateNodeTemplate = async (
     })
 
     if (response) {
-      const channelList = await db.workflows.findUnique({
+      const channelList = await db.workflow.findUnique({
         where: {
           id: workflowId,
         },
@@ -78,49 +78,45 @@ export const onCreateNodeTemplate = async (
         },
       })
 
-      if (channelList) {
-        //remove duplicates before insert
-        const NonDuplicated = channelList.slackChannels.filter(
-          (channel) => channel !== channels![0].value
-        )
+      if (channelList?.slackChannels?.length) {
+        // Remove duplicates before insert
+        const nonDuplicatedChannels = channels?.map(ch => ch.value).filter(
+          channel => !channelList.slackChannels.includes(channel)
+        ) || []
 
-        NonDuplicated!
-          .map((channel) => channel)
-          .forEach(async (channel) => {
-            await db.workflows.update({
-              where: {
-                id: workflowId,
-              },
-              data: {
-                slackChannels: {
-                  push: channel,
-                },
-              },
-            })
-          })
-
-        return 'Slack template saved'
-      }
-      channels!
-        .map((channel) => channel.value)
-        .forEach(async (channel) => {
-          await db.workflows.update({
+        if (nonDuplicatedChannels.length > 0) {
+          await db.workflow.update({
             where: {
               id: workflowId,
             },
             data: {
               slackChannels: {
-                push: channel,
+                push: nonDuplicatedChannels,
               },
             },
           })
+        }
+
+        return 'Slack template saved'
+      }
+
+      // If no existing channels, add all new channels
+      if (channels?.length) {
+        await db.workflow.update({
+          where: {
+            id: workflowId,
+          },
+          data: {
+            slackChannels: channels.map(ch => ch.value),
+          },
         })
+      }
       return 'Slack template saved'
     }
   }
 
   if (type === 'Notion') {
-    const response = await db.workflows.update({
+    const response = await db.workflow.update({
       where: {
         id: workflowId,
       },
@@ -137,15 +133,26 @@ export const onCreateNodeTemplate = async (
 
 export const onGetWorkflows = async () => {
   const user = await currentUser()
-  if (user) {
-    const workflow = await db.workflows.findMany({
-      where: {
-        userId: user.id,
-      },
-    })
+  if (!user) return []
 
-    if (workflow) return workflow
-  }
+  const dbUser = await db.user.findUnique({
+    where: {
+      clerkId: user.id,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (!dbUser) return []
+
+  const workflows = await db.workflow.findMany({
+    where: {
+      userId: dbUser.id,
+    },
+  })
+
+  return workflows
 }
 
 export const onCreateWorkflow = async (name: string, description: string) => {
@@ -170,9 +177,9 @@ export const onCreateWorkflow = async (name: string, description: string) => {
     })
 
     // Now create the workflow
-    const workflow = await db.workflows.create({
+    const workflow = await db.workflow.create({
       data: {
-        userId: user.id,
+        userId: dbUser.id,
         name,
         description,
       },
@@ -187,7 +194,7 @@ export const onCreateWorkflow = async (name: string, description: string) => {
 }
 
 export const onGetNodesEdges = async (flowId: string) => {
-  const nodesEdges = await db.workflows.findUnique({
+  const nodesEdges = await db.workflow.findUnique({
     where: {
       id: flowId,
     },

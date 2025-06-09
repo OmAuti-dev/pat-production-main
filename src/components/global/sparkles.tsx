@@ -20,6 +20,7 @@ type ParticlesProps = {
   particleColor?: string
   particleDensity?: number
 }
+
 export const SparklesCore = (props: ParticlesProps) => {
   const {
     id,
@@ -31,7 +32,10 @@ export const SparklesCore = (props: ParticlesProps) => {
     particleColor,
     particleDensity,
   } = props
+  
   const [init, setInit] = useState(false)
+  const controls = useAnimation()
+
   useEffect(() => {
     initParticlesEngine(async (engine) => {
       await loadSlim(engine)
@@ -39,22 +43,25 @@ export const SparklesCore = (props: ParticlesProps) => {
       setInit(true)
     })
   }, [])
-  const controls = useAnimation()
 
   const particlesLoaded = async (container?: Container) => {
     if (container) {
-      console.log(container)
-      controls.start({
-        opacity: 1,
-        transition: {
-          duration: 1,
-        },
-      })
+      try {
+        await controls.start({
+          opacity: 1,
+          transition: {
+            duration: 1,
+          },
+        })
+      } catch (error) {
+        console.error('Error animating particles:', error)
+      }
     }
   }
 
   return (
     <motion.div
+      initial={{ opacity: 0 }}
       animate={controls}
       className={cn('opacity-0', className)}
     >
@@ -73,7 +80,6 @@ export const SparklesCore = (props: ParticlesProps) => {
               enable: false,
               zIndex: 1,
             },
-
             fpsLimit: 120,
             interactivity: {
               events: {

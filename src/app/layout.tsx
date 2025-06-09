@@ -3,6 +3,8 @@ import './globals.css'
 import { Inter } from 'next/font/google'
 import { Providers } from '@/providers/providers'
 import { Metadata } from 'next'
+import { AuthSync } from '@/components/auth/auth-sync'
+import { Toaster } from '@/components/ui/sonner'
 
 const font = Inter({
   subsets: ['latin'],
@@ -11,7 +13,7 @@ const font = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Fuzzie',
+  title: '🤖 PAT',
   description: 'Project Management System',
 }
 
@@ -21,20 +23,19 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={font.className}>
-        <ClerkProvider
-          appearance={{
-            elements: {
-              footer: 'hidden',
-            },
-          }}
-        >
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <meta charSet="utf-8" />
+        </head>
+        <body className={`${font.className} antialiased`}>
           <Providers>
+            <AuthSync />
             {children}
           </Providers>
-        </ClerkProvider>
-      </body>
-    </html>
+          <Toaster />
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

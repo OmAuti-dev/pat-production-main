@@ -135,10 +135,12 @@ export function TasksTable({ tasks, onEdit, onDelete, onUnassign }: TasksTablePr
                       <Pencil className="mr-2 h-4 w-4" />
                       Edit
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onUnassign(task.id)}>
-                      <UserMinus className="mr-2 h-4 w-4" />
-                      Unassign
-                    </DropdownMenuItem>
+                    {task.assignedTo && (
+                      <DropdownMenuItem onClick={() => onUnassign(task.id)}>
+                        <UserMinus className="mr-2 h-4 w-4" />
+                        Unassign
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem 
                       onClick={() => onDelete(task.id)}
                       className="text-red-600"

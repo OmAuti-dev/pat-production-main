@@ -15,6 +15,7 @@ export async function getEmployees() {
         }
       },
       select: {
+        id: true,
         clerkId: true,
         name: true,
         role: true,

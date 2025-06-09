@@ -1,26 +1,55 @@
 export interface Project {
   id: string
   name: string
-  type: string
-  progress: number
-  createdAt: string
-  updatedAt: string
-  userId: string
+  description: string | null
+  status: string
+  startDate: Date | null
+  endDate: Date | null
+  createdAt: Date
+  updatedAt: Date
+  managerId: string
+  clientId: string | null
+  teamId: string | null
+  client?: {
+    name: string | null
+  }
+  team?: {
+    id: string
+    name: string
+    members: Array<{
+      user: {
+        clerkId: string
+        name: string | null
+        profileImage: string | null
+        role: string
+        assignedTasks: Array<{
+          id: string
+          status: string
+        }>
+      }
+    }>
+  }
 }
 
 export interface Task {
   id: string
   title: string
+  description: string | null
   status: 'TODO' | 'IN_PROGRESS' | 'DONE'
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
-  createdAt: string
-  updatedAt: string
-  projectId: string
-  userId: string
-  deadline?: Date
+  deadline: Date | null
+  createdAt: Date
+  updatedAt: Date
+  creatorId: string
+  assignedToId: string | null
+  projectId: string | null
   assignedTo?: {
+    name: string | null
+    profileImage: string | null
+  }
+  project?: {
+    id: string
     name: string
-    profileImage?: string
   }
 }
 
@@ -35,6 +64,15 @@ export interface Campaign {
   createdAt: string
   updatedAt: string
   userId: string
+}
+
+export interface ProjectMember {
+  id: string
+  name: string | null
+  profileImage: string | null
+  role: string
+  assignedTasks: number
+  completedTasks: number
 }
 
 export type ProjectsResponse = Project[]

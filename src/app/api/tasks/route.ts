@@ -1,111 +1,124 @@
 import { db } from '@/lib/db'
 import { auth } from '@clerk/nextjs'
 import { NextResponse } from 'next/server'
+import { currentUser } from '@clerk/nextjs'
+import { Prisma } from '@prisma/client'
 
-export async function GET(req: Request) {
+export async function GET(request: Request) {
   try {
-    const { userId } = auth()
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const user = await currentUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = new URL(req.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '10')
-    const projectId = searchParams.get('projectId')
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id }
+    })
+
+    if (!dbUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const query = searchParams.get('query')
     const status = searchParams.get('status')
     const priority = searchParams.get('priority')
-    const search = searchParams.get('search')
+    const projectId = searchParams.get('projectId')
 
-    const where = {
-      userId,
-      ...(projectId && { projectId }),
-      ...(status && { status }),
-      ...(priority && { priority }),
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' } }
-        ]
-      })
+    const where: Prisma.TaskWhereInput = {
+      OR: query ? [
+        {
+          title: {
+            contains: query,
+            mode: 'insensitive'
+          }
+        }
+      ] : undefined,
+      status: status || undefined,
+      priority: priority || undefined,
+      projectId: projectId || undefined,
+      assignedToId: dbUser.id.toString()
     }
 
-    const [tasks, total] = await Promise.all([
-      db.task.findMany({
-        where,
-        include: {
-          assignedTo: {
-            select: {
-              name: true,
-              profileImage: true
-            }
-          },
-          Project: true
-        },
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit
-      }),
-      db.task.count({ where })
-    ])
-
-    return NextResponse.json({
-      tasks,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit)
+    const tasks = await db.task.findMany({
+      where,
+      include: {
+        project: true,
+        assignedTo: true,
+        createdBy: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
     })
+
+    return NextResponse.json(tasks)
   } catch (error) {
-    console.error('[TASKS_GET]', error)
-    return new NextResponse('Internal Error', { status: 500 })
+    console.error('Error fetching tasks:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch tasks' },
+      { status: 500 }
+    )
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const { userId } = auth()
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const user = await currentUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await req.json()
-    const { title, projectId, status = 'TODO', priority = 'MEDIUM' } = body
+    const data = await request.json()
+    const { title, description, priority, dueDate, projectId } = data
 
-    if (!title || !projectId) {
-      return new NextResponse('Missing required fields', { status: 400 })
+    // Validate required fields
+    if (!title) {
+      return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     }
 
-    // Verify project exists and user has access
-    const project = await db.project.findUnique({
-      where: { id: projectId }
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id }
     })
 
-    if (!project || project.userId !== userId) {
-      return new NextResponse('Project not found or unauthorized', { status: 404 })
+    if (!dbUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
     const task = await db.task.create({
       data: {
         title,
-        projectId,
-        status,
-        priority,
-        userId
-      },
-      include: {
-        assignedTo: {
-          select: {
-            name: true,
-            profileImage: true
+        description,
+        priority: priority || 'MEDIUM',
+        status: 'TODO',
+        createdBy: {
+          connect: {
+            id: dbUser.id
           }
         },
-        Project: true
+        ...(projectId && {
+          project: {
+            connect: {
+              id: projectId
+            }
+          }
+        }),
+        deadline: dueDate ? new Date(dueDate) : null
+      },
+      include: {
+        project: true,
+        assignedTo: true,
+        createdBy: true
       }
     })
 
     return NextResponse.json(task)
   } catch (error) {
-    console.error('[TASKS_POST]', error)
-    return new NextResponse('Internal Error', { status: 500 })
+    console.error('Error creating task:', error)
+    return NextResponse.json(
+      { error: 'Failed to create task' },
+      { status: 500 }
+    )
   }
 }
 
@@ -125,14 +138,14 @@ export async function PUT(req: Request) {
 
     const task = await db.task.findUnique({
       where: { id },
-      include: { Project: true }
+      include: { project: true }
     })
 
     if (!task) {
       return new NextResponse('Task not found', { status: 404 })
     }
 
-    if (task.userId !== userId) {
+    if (task.assignedToId !== userId) {
       return new NextResponse('Unauthorized', { status: 403 })
     }
 
@@ -150,7 +163,7 @@ export async function PUT(req: Request) {
             profileImage: true
           }
         },
-        Project: true
+        project: true
       }
     })
 
@@ -177,14 +190,14 @@ export async function DELETE(req: Request) {
 
     const task = await db.task.findUnique({
       where: { id: taskId },
-      include: { Project: true }
+      include: { project: true }
     })
 
     if (!task) {
       return new NextResponse('Task not found', { status: 404 })
     }
 
-    if (task.userId !== userId) {
+    if (task.assignedToId !== userId) {
       return new NextResponse('Unauthorized', { status: 403 })
     }
 

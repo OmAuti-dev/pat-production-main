@@ -3,15 +3,16 @@
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
 import { revalidatePath } from 'next/cache'
+import { triggerTaskUpdate } from './real-time'
 
 interface EditTaskData {
   id: string
   title?: string
   status?: string
   priority?: string
-  deadline?: string
-  assignedToId?: string
-  projectId?: string
+  deadline?: Date | null
+  assignedToId?: string | null
+  projectId?: string | null
 }
 
 export async function editTask(data: EditTaskData) {
@@ -21,10 +22,10 @@ export async function editTask(data: EditTaskData) {
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Validate user role
+    // Get user's internal database ID
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true }
+      select: { id: true, role: true }
     })
 
     if (!dbUser || (dbUser.role !== 'MANAGER' && dbUser.role !== 'TEAM_LEADER')) {
@@ -52,13 +53,13 @@ export async function editTask(data: EditTaskData) {
     }
 
     // If changing assignee, validate assignee exists
-    if (data.assignedToId) {
-      const assignee = await db.user.findUnique({
-        where: { clerkId: data.assignedToId }
-      })
-
-      if (!assignee) {
-        return { success: false, error: 'Assigned user not found' }
+    let assigneeId: string | undefined | null = undefined
+    if (data.assignedToId !== undefined) {
+      if (data.assignedToId === null) {
+        assigneeId = null
+      } else {
+        // We're now using the database ID directly since that's what we're passing from the frontend
+        assigneeId = data.assignedToId
       }
     }
 
@@ -69,27 +70,64 @@ export async function editTask(data: EditTaskData) {
         title: data.title,
         status: data.status,
         priority: data.priority,
-        dueDate: data.deadline,
-        assignedToId: data.assignedToId,
+        deadline: data.deadline,
+        assignedToId: assigneeId,
         projectId: data.projectId
       },
       include: {
         assignedTo: {
           select: {
+            id: true,
             name: true,
-            profileImage: true
+            profileImage: true,
+            role: true
           }
         },
-        Project: {
+        project: {
           select: {
+            id: true,
             name: true
           }
         }
       }
     })
 
+    // Transform task to match interface
+    const transformedTask = {
+      id: updatedTask.id,
+      title: updatedTask.title,
+      description: updatedTask.description,
+      status: updatedTask.status,
+      priority: updatedTask.priority,
+      deadline: updatedTask.deadline,
+      createdAt: updatedTask.createdAt,
+      updatedAt: updatedTask.updatedAt,
+      creatorId: updatedTask.creatorId,
+      assignedToId: updatedTask.assignedToId,
+      projectId: updatedTask.projectId,
+      assignedTo: updatedTask.assignedTo ? {
+        id: updatedTask.assignedTo.id,
+        name: updatedTask.assignedTo.name,
+        profileImage: updatedTask.assignedTo.profileImage,
+        role: updatedTask.assignedTo.role
+      } : undefined,
+      project: updatedTask.project ? {
+        id: updatedTask.project.id,
+        name: updatedTask.project.name
+      } : undefined
+    }
+
+    // Trigger real-time update
+    await triggerTaskUpdate(data.id, transformedTask)
+
+    // Revalidate paths
     revalidatePath('/manager/dashboard')
-    return { success: true, task: updatedTask }
+    revalidatePath('/employee/dashboard')
+    if (data.projectId) {
+      revalidatePath(`/projects/${data.projectId}`)
+    }
+
+    return { success: true, task: transformedTask }
   } catch (error) {
     console.error('Error editing task:', error)
     return { 
@@ -131,6 +169,7 @@ export async function deleteTask(taskId: string) {
     })
 
     revalidatePath('/manager/dashboard')
+    revalidatePath('/employee/dashboard')
     return { success: true }
   } catch (error) {
     console.error('Error deleting task:', error)
@@ -171,25 +210,62 @@ export async function unassignTask(taskId: string) {
     const updatedTask = await db.task.update({
       where: { id: taskId },
       data: {
-        assignedToId: ''
+        assignedToId: null
       },
       include: {
         assignedTo: {
           select: {
+            id: true,
             name: true,
-            profileImage: true
+            profileImage: true,
+            role: true
           }
         },
-        Project: {
+        project: {
           select: {
+            id: true,
             name: true
           }
         }
       }
     })
 
+    // Transform task to match interface
+    const transformedTask = {
+      id: updatedTask.id,
+      title: updatedTask.title,
+      description: updatedTask.description,
+      status: updatedTask.status,
+      priority: updatedTask.priority,
+      deadline: updatedTask.deadline,
+      createdAt: updatedTask.createdAt,
+      updatedAt: updatedTask.updatedAt,
+      creatorId: updatedTask.creatorId,
+      assignedToId: updatedTask.assignedToId,
+      projectId: updatedTask.projectId,
+      assignedTo: updatedTask.assignedTo ? {
+        id: updatedTask.assignedTo.id,
+        name: updatedTask.assignedTo.name,
+        profileImage: updatedTask.assignedTo.profileImage,
+        role: updatedTask.assignedTo.role
+      } : undefined,
+      project: updatedTask.project ? {
+        id: updatedTask.project.id,
+        name: updatedTask.project.name
+      } : undefined
+    }
+
+    // Trigger real-time update
+    await triggerTaskUpdate(taskId, transformedTask)
+
+    // Revalidate paths
     revalidatePath('/manager/dashboard')
-    return { success: true, task: updatedTask }
+    revalidatePath('/employee/dashboard')
+    if (updatedTask.projectId) {
+      revalidatePath(`/projects/${updatedTask.projectId}`)
+    }
+
+    return { success: true, task: transformedTask }
   } catch (error) {
     console.error('Error unassigning task:', error)
     return { 

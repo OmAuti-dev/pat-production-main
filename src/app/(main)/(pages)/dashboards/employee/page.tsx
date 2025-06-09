@@ -137,7 +137,7 @@ export default function EmployeeDashboard(): JSX.Element {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
         <div>
           <h1 className="text-3xl font-bold">Welcome back{user ? `, ${user.firstName}!` : '!'}</h1>
-          <p className="text-muted-foreground">Here's an overview of your tasks and progress</p>
+          <p className="text-muted-foreground">Here&apos;s an overview of your tasks and progress</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -177,7 +177,7 @@ export default function EmployeeDashboard(): JSX.Element {
         </Card>
         <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] dark:hover:shadow-primary/5">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Today's Tasks</CardTitle>
+            <CardTitle className="text-sm font-medium">Today&apos;s Tasks</CardTitle>
             <span role="img" aria-label="today" className="text-muted-foreground">📅</span>
           </CardHeader>
           <CardContent>

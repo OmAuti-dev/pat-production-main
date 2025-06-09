@@ -14,28 +14,33 @@ import { toast } from "sonner"
 import { addEmployeeToProject, getProjectEmployees } from "../_actions/project"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { format } from 'date-fns'
 
 type ProjectDetailsModalProps = {
   project: {
     id: string
     name: string
-    description: string
-    type: string
-    progress: number
+    description: string | null
+    status: string
+    startDate: Date | null
+    endDate: Date | null
     client: {
-      name: string
+      name: string | null
     }
   }
   isOpen: boolean
   onClose: () => void
-  employees: { id: string; name: string }[]
+  employees: { id: string; name: string | null }[]
   userRole: string
 }
 
 type ProjectEmployee = {
-  clerkId: string
+  id: string
   name: string | null
   profileImage: string | null
+  role: string
+  assignedTasks: number
+  completedTasks: number
 }
 
 export default function ProjectDetailsModal({
@@ -45,56 +50,34 @@ export default function ProjectDetailsModal({
   employees,
   userRole,
 }: ProjectDetailsModalProps) {
-  const [showAddEmployee, setShowAddEmployee] = useState(false)
-  const [projectEmployees, setProjectEmployees] = useState<ProjectEmployee[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const loadProjectEmployees = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const response = await getProjectEmployees(project.id)
-      if (Array.isArray(response)) {
-        setProjectEmployees(response as ProjectEmployee[])
-      } else {
-        setProjectEmployees([])
-      }
-    } catch (error) {
-      console.error('Error loading project employees:', error)
-      setError('Failed to load team members')
-      toast.error("Failed to load team members")
-      setProjectEmployees([])
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [projectEmployees, setProjectEmployees] = useState<ProjectEmployee[]>([])
 
   useEffect(() => {
     if (isOpen) {
       loadProjectEmployees()
-    } else {
-      setProjectEmployees([])
-      setError(null)
-      setLoading(false)
     }
   }, [isOpen, project.id])
 
-  const onAddEmployee = async (employeeId: string) => {
+  const loadProjectEmployees = async () => {
+    try {
+      const employees = await getProjectEmployees(project.id)
+      setProjectEmployees(employees)
+    } catch (error) {
+      console.error('Error loading project employees:', error)
+      toast.error('Failed to load team members')
+    }
+  }
+
+  const handleAddEmployee = async (employeeId: string) => {
     try {
       setLoading(true)
-      setError(null)
-      const response = await addEmployeeToProject(project.id, employeeId)
-      if (Array.isArray(response)) {
-        setProjectEmployees(response as ProjectEmployee[])
-      } else {
-        setProjectEmployees([])
-      }
-      toast.success("Employee added to project")
+      await addEmployeeToProject(project.id, employeeId)
+      await loadProjectEmployees()
+      toast.success('Team member added successfully')
     } catch (error) {
       console.error('Error adding employee:', error)
-      setError('Failed to add team member')
-      toast.error("Failed to add team member")
+      toast.error('Failed to add team member')
     } finally {
       setLoading(false)
     }
@@ -119,16 +102,24 @@ export default function ProjectDetailsModal({
             </div>
             <div className="flex justify-between">
               <div>
-                <Label>Type</Label>
-                <p className="text-sm text-muted-foreground mt-1">{project.type}</p>
+                <Label>Status</Label>
+                <p className="text-sm text-muted-foreground mt-1">{project.status}</p>
               </div>
               <div>
-                <Label>Progress</Label>
-                <p className="text-sm text-muted-foreground mt-1">{project.progress}%</p>
+                <Label>Start Date</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {project.startDate ? format(project.startDate, 'MMM d, yyyy') : 'Not set'}
+                </p>
+              </div>
+              <div>
+                <Label>End Date</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {project.endDate ? format(project.endDate, 'MMM d, yyyy') : 'Not set'}
+                </p>
               </div>
               <div>
                 <Label>Client</Label>
-                <p className="text-sm text-muted-foreground mt-1">{project.client.name}</p>
+                <p className="text-sm text-muted-foreground mt-1">{project.client.name || 'No Client'}</p>
               </div>
             </div>
           </div>
@@ -137,67 +128,37 @@ export default function ProjectDetailsModal({
           {(userRole === 'MANAGER' || userRole === 'TEAM_LEADER') && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Team Members</h3>
-                <Button 
-                  onClick={() => setShowAddEmployee(!showAddEmployee)} 
-                  size="sm"
-                  disabled={loading}
-                >
-                  {showAddEmployee ? 'Cancel' : 'Add Employees'}
-                </Button>
+                <h3 className="text-sm font-medium">Add Team Members</h3>
               </div>
 
-              {error && (
-                <div className="text-sm text-red-500 bg-red-50 p-2 rounded">
-                  {error}
-                </div>
-              )}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">Available Employees</h4>
+                <ScrollArea className="h-[200px]">
+                  <div className="space-y-2">
+                    {employees
+                      .filter(emp => !projectEmployees.some(pe => pe.id === emp.id))
+                      .map(employee => (
+                        <Button
+                          key={employee.id}
+                          variant="ghost"
+                          className="w-full justify-start"
+                          onClick={() => handleAddEmployee(employee.id)}
+                          disabled={loading}
+                        >
+                          {employee.name}
+                        </Button>
+                      ))}
+                  </div>
+                </ScrollArea>
+              </div>
 
-              {showAddEmployee && (
-                <div className="space-y-4">
-                  <h4 className="text-sm font-medium">Available Employees</h4>
-                  <ScrollArea className="h-[200px]">
-                    <div className="space-y-4">
-                      {loading ? (
-                        <p className="text-center text-muted-foreground">Loading...</p>
-                      ) : employees
-                        .filter(emp => !projectEmployees.some(pe => pe.clerkId === emp.id))
-                        .map(employee => (
-                          <div
-                            key={employee.id}
-                            className="flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Avatar className="h-8 w-8">
-                                <AvatarImage src="" />
-                                <AvatarFallback>
-                                  {employee.name?.charAt(0).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span>{employee.name}</span>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onAddEmployee(employee.id)}
-                              disabled={loading}
-                            >
-                              {loading ? 'Adding...' : 'Add'}
-                            </Button>
-                          </div>
-                        ))}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
-
-              <div className="mt-4">
+              <div>
                 <h4 className="text-sm font-medium mb-2">Current Team Members</h4>
                 <ScrollArea className="h-[200px]">
                   <div className="space-y-4">
                     {projectEmployees.map((employee) => (
                       <div
-                        key={employee.clerkId}
+                        key={employee.id}
                         className="flex items-center gap-2"
                       >
                         <Avatar className="h-8 w-8">
@@ -206,7 +167,13 @@ export default function ProjectDetailsModal({
                             {employee.name?.charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
-                        <span>{employee.name}</span>
+                        <div>
+                          <p className="text-sm font-medium">{employee.name}</p>
+                          <p className="text-xs text-muted-foreground">{employee.role}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {employee.completedTasks}/{employee.assignedTasks} tasks
+                          </p>
+                        </div>
                       </div>
                     ))}
                   </div>

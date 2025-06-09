@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 
 type User = {
   id: string
+  clerkId: string
   email: string
   name: string
   role: 'MANAGER' | 'TEAM_LEADER' | 'EMPLOYEE' | 'CLIENT'
@@ -37,9 +38,13 @@ export default function ManageRoles() {
   const fetchUsers = async () => {
     try {
       const response = await fetch('/api/users')
+      if (!response.ok) {
+        throw new Error('Failed to fetch users')
+      }
       const data = await response.json()
       setUsers(data)
     } catch (error) {
+      console.error('Error fetching users:', error)
       toast.error('Failed to fetch users')
     } finally {
       setLoading(false)
@@ -48,20 +53,24 @@ export default function ManageRoles() {
 
   const updateUserRole = async (userId: string, newRole: User['role']) => {
     try {
-      const response = await fetch('/api/users/role', {
+      const response = await fetch(`/api/employees/${userId}/role`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId, role: newRole }),
+        body: JSON.stringify({ role: newRole }),
       })
 
-      if (!response.ok) throw new Error('Failed to update role')
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(error || 'Failed to update role')
+      }
 
       toast.success('Role updated successfully')
       fetchUsers() // Refresh the users list
     } catch (error) {
-      toast.error('Failed to update role')
+      console.error('Error updating role:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to update role')
     }
   }
 

@@ -22,16 +22,14 @@ import {
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createTask } from '../_actions/create-task'
+import type { Employee, Project } from '../types'
 
-interface Employee {
-  id: string
-  name: string | null
-  role: string
-}
-
-interface Project {
-  id: string
-  name: string
+interface TaskFormData {
+  title: string
+  projectId: string | null
+  assignedToId: string | null
+  priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  deadline: string
 }
 
 interface CreateTaskModalProps {
@@ -43,11 +41,11 @@ interface CreateTaskModalProps {
 
 export function CreateTaskModal({ isOpen, onClose, employees, projects }: CreateTaskModalProps) {
   const router = useRouter()
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<TaskFormData>({
     title: '',
-    projectId: '',
-    assignedToId: '',
-    priority: 'MEDIUM' as 'LOW' | 'MEDIUM' | 'HIGH',
+    projectId: null,
+    assignedToId: null,
+    priority: 'MEDIUM',
     deadline: ''
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -55,55 +53,34 @@ export function CreateTaskModal({ isOpen, onClose, employees, projects }: Create
   const resetForm = () => {
     setFormData({
       title: '',
-      projectId: '',
-      assignedToId: '',
+      projectId: null,
+      assignedToId: null,
       priority: 'MEDIUM',
       deadline: ''
     })
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    
-    // Validate form
-    if (!formData.title.trim()) {
-      toast.error('Please enter a task title')
-      return
-    }
-    if (!formData.projectId) {
-      toast.error('Please select a project')
-      return
-    }
-    if (!formData.assignedToId) {
-      toast.error('Please select an employee')
-      return
-    }
-    if (!formData.deadline) {
-      toast.error('Please select a deadline')
-      return
-    }
-
     try {
       setIsSubmitting(true)
+      const deadline = formData.deadline ? new Date(formData.deadline) : null
       const result = await createTask({
-        title: formData.title.trim(),
-        priority: formData.priority,
-        deadline: new Date(formData.deadline),
-        assignedToId: formData.assignedToId,
-        projectId: formData.projectId
+        ...formData,
+        deadline
       })
-
+      
       if (result.success) {
         toast.success('Task created successfully')
         resetForm()
-        router.refresh()
         onClose()
+        // Real-time update will handle the UI refresh
       } else {
         toast.error(result.error || 'Failed to create task')
       }
     } catch (error) {
       console.error('Error creating task:', error)
-      toast.error('Failed to create task. Please try again.')
+      toast.error('Failed to create task')
     } finally {
       setIsSubmitting(false)
     }
@@ -124,13 +101,14 @@ export function CreateTaskModal({ isOpen, onClose, employees, projects }: Create
           <div className="grid gap-2">
             <Label htmlFor="project">Project</Label>
             <Select
-              value={formData.projectId}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value }))}
+              value={formData.projectId || 'no-project'}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value === 'no-project' ? null : value }))}
             >
               <SelectTrigger id="project">
                 <SelectValue placeholder="Select project" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="no-project">No Project</SelectItem>
                 {projects.map((project) => (
                   <SelectItem key={project.id} value={project.id}>
                     {project.name}
@@ -154,13 +132,14 @@ export function CreateTaskModal({ isOpen, onClose, employees, projects }: Create
           <div className="grid gap-2">
             <Label htmlFor="assignee">Assign To</Label>
             <Select
-              value={formData.assignedToId}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, assignedToId: value }))}
+              value={formData.assignedToId || 'unassigned'}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, assignedToId: value === 'unassigned' ? null : value }))}
             >
               <SelectTrigger id="assignee">
                 <SelectValue placeholder="Select employee" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
                 {employees.map((employee) => (
                   <SelectItem key={employee.id} value={employee.id}>
                     {employee.name || 'Unnamed Employee'} ({employee.role})

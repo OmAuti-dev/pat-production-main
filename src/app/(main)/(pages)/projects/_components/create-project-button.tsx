@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus } from 'lucide-react'
+import { Loader2, Plus } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -32,8 +32,10 @@ import { useRouter } from 'next/navigation'
 const projectSchema = z.object({
   name: z.string().min(1, 'Project name is required'),
   description: z.string().min(1, 'Project description is required'),
-  type: z.string().min(1, 'Project type is required'),
+  status: z.string().min(1, 'Project status is required'),
   clientId: z.string().min(1, 'Client is required'),
+  startDate: z.date().nullable(),
+  endDate: z.date().nullable(),
   resources: z.array(z.object({
     title: z.string(),
     url: z.string().url('Must be a valid URL'),
@@ -45,6 +47,7 @@ type ProjectFormValues = z.infer<typeof projectSchema>
 
 export default function CreateProjectButton({ clients }: { clients: { id: string, name: string }[] }) {
   const [open, setOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [resources, setResources] = useState<{ title: string; url: string; type: string }[]>([])
   const router = useRouter()
 
@@ -53,16 +56,25 @@ export default function CreateProjectButton({ clients }: { clients: { id: string
     defaultValues: {
       name: '',
       description: '',
-      type: '',
+      status: 'PENDING',
       clientId: '',
+      startDate: null,
+      endDate: null,
       resources: []
     }
   })
 
   const onSubmit = async (data: ProjectFormValues) => {
     try {
-      data.resources = resources
-      await createProject(data)
+      setIsLoading(true)
+      await createProject({
+        name: data.name,
+        description: data.description,
+        status: data.status,
+        clientId: data.clientId,
+        startDate: data.startDate,
+        endDate: data.endDate
+      })
       toast.success('Project created successfully')
       setOpen(false)
       form.reset()
@@ -70,6 +82,8 @@ export default function CreateProjectButton({ clients }: { clients: { id: string
       router.refresh()
     } catch (error) {
       toast.error('Failed to create project')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -132,22 +146,21 @@ export default function CreateProjectButton({ clients }: { clients: { id: string
             />
             <FormField
               control={form.control}
-              name="type"
+              name="status"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Project Type</FormLabel>
+                  <FormLabel>Project Status</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select project type" />
+                        <SelectValue placeholder="Select project status" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="web">Web Development</SelectItem>
-                      <SelectItem value="mobile">Mobile Development</SelectItem>
-                      <SelectItem value="design">Design</SelectItem>
-                      <SelectItem value="marketing">Marketing</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="PENDING">Pending</SelectItem>
+                      <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                      <SelectItem value="COMPLETED">Completed</SelectItem>
+                      <SelectItem value="ON_HOLD">On Hold</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -178,6 +191,34 @@ export default function CreateProjectButton({ clients }: { clients: { id: string
                 </FormItem>
               )}
             />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="startDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Start Date</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} value={field.value ? new Date(field.value).toISOString().split('T')[0] : ''} onChange={e => field.onChange(e.target.value ? new Date(e.target.value) : null)} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="endDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>End Date</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} value={field.value ? new Date(field.value).toISOString().split('T')[0] : ''} onChange={e => field.onChange(e.target.value ? new Date(e.target.value) : null)} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -218,7 +259,29 @@ export default function CreateProjectButton({ clients }: { clients: { id: string
               ))}
             </div>
 
-            <Button type="submit">Create Project</Button>
+            <div className="flex justify-end space-x-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setOpen(false)}
+                disabled={isLoading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Project
+                  </>
+                )}
+              </Button>
+            </div>
           </form>
         </Form>
       </DialogContent>

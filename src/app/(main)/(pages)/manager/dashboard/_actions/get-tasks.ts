@@ -8,10 +8,10 @@ export async function getTasks() {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
-    // Get user's role
+    // Get user's role and ID
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true }
+      select: { id: true, role: true }
     })
 
     if (!dbUser || dbUser.role !== 'MANAGER') {
@@ -26,7 +26,7 @@ export async function getTasks() {
             profileImage: true
           }
         },
-        Project: {
+        project: {
           select: {
             id: true,
             name: true
@@ -38,7 +38,30 @@ export async function getTasks() {
       }
     })
 
-    return { success: true, tasks }
+    // Transform tasks to match the expected format
+    const transformedTasks = tasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      deadline: task.deadline,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      creatorId: task.creatorId,
+      assignedToId: task.assignedToId,
+      projectId: task.projectId,
+      assignedTo: task.assignedTo ? {
+        name: task.assignedTo.name,
+        profileImage: task.assignedTo.profileImage
+      } : undefined,
+      project: task.project ? {
+        id: task.project.id,
+        name: task.project.name
+      } : undefined
+    }))
+
+    return { success: true, tasks: transformedTasks }
   } catch (error) {
     console.error('Error fetching tasks:', error)
     return { success: false, error: 'Failed to fetch tasks' }

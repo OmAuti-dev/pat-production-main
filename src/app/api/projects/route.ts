@@ -1,86 +1,112 @@
-import { db } from '@/lib/db'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs'
-import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { db } from '@/lib/db'
 
-export async function GET(req: Request) {
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+export async function GET() {
   try {
     const { userId } = auth()
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const { searchParams } = new URL(req.url)
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '10')
-    const status = searchParams.get('status')
-    const search = searchParams.get('search')
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, role: true }
+    })
 
-    const where = {
-      userId,
-      ...(status && { 
-        progress: status === 'completed' ? 100 : 
-                 status === 'in_progress' ? { gt: 0, lt: 100 } :
-                 0
-      }),
-      ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { type: { contains: search, mode: 'insensitive' } }
-        ]
-      })
+    if (!dbUser) {
+      return new NextResponse('User not found', { status: 404 })
     }
 
-    const [projects, total] = await Promise.all([
-      db.project.findMany({
-        where,
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit
-      }),
-      db.project.count({ where })
-    ])
-
-    return NextResponse.json({
-      projects,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit)
+    // Get projects based on user's role
+    const projects = await db.project.findMany({
+      where: dbUser.role === 'MANAGER' ? {} : {
+        OR: [
+          { teamMembers: { some: { user: { clerkId: userId } } } },
+          { tasks: { some: { assignedToId: userId } } }
+        ]
+      },
+      include: {
+        client: {
+          select: {
+            name: true,
+            email: true,
+            profileImage: true
+          }
+        },
+        manager: {
+          select: {
+            name: true,
+            email: true,
+            profileImage: true
+          }
+        },
+        tasks: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            priority: true,
+            dueDate: true,
+            assignedToId: true,
+            createdById: true
+          }
+        }
+      }
     })
+
+    return NextResponse.json(projects)
   } catch (error) {
-    console.error('[PROJECTS_GET]', error)
+    console.error('Error fetching projects:', error)
     return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: NextRequest) {
   try {
     const { userId } = auth()
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const body = await req.json()
-    const { name, type } = body
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, role: true }
+    })
 
-    if (!name || !type) {
+    if (!dbUser) {
+      return new NextResponse('User not found', { status: 404 })
+    }
+
+    // Only managers can create projects
+    if (dbUser.role !== 'MANAGER') {
+      return new NextResponse('Not authorized to create projects', { status: 403 })
+    }
+
+    const body = await request.json()
+    const { name, description, type, clientId } = body
+
+    if (!name || !description || !type || !clientId) {
       return new NextResponse('Missing required fields', { status: 400 })
     }
 
     const project = await db.project.create({
       data: {
         name,
+        description,
         type,
-        userId,
+        clientId,
+        managerId: userId,
         progress: 0
       }
     })
 
     return NextResponse.json(project)
   } catch (error) {
-    console.error('[PROJECTS_POST]', error)
+    console.error('Error creating project:', error)
     return new NextResponse('Internal Error', { status: 500 })
   }
 }

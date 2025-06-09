@@ -34,7 +34,7 @@ const roleBasedNavigation = {
     { href: '/kanban', label: 'Kanban Board', icon: KanbanSquare },
     { href: '/reports', label: 'Reports', icon: FileSpreadsheet },
     { href: '/connections', label: 'Connections', icon: Network },
-    { href: '/manager/roles', label: 'Manage Roles', icon: Users },
+    { href: '/dashboards/manager/manage-roles', label: 'Manage Roles', icon: Users },
     { href: '/settings', label: 'Settings', icon: Settings },
   ],
   ADMIN: [
@@ -45,7 +45,7 @@ const roleBasedNavigation = {
     { href: '/kanban', label: 'Kanban Board', icon: KanbanSquare },
     { href: '/reports', label: 'Reports', icon: FileSpreadsheet },
     { href: '/connections', label: 'Connections', icon: Network },
-    { href: '/manager/roles', label: 'Manage Roles', icon: Users },
+    { href: '/dashboards/manager/manage-roles', label: 'Manage Roles', icon: Users },
     { href: '/settings', label: 'Settings', icon: Settings },
   ],
   TEAM_LEADER: [
