@@ -4,10 +4,15 @@ import { z } from 'zod'
 export const EditUserProfileSchema = z.object({
   email: z.string().email('Required'),
   name: z.string().min(1, 'Required'),
-  skills: z.array(z.string()).min(1, 'At least one skill is required'),
   phoneNumber: z.string().optional(),
-  resumeUrl: z.string().optional()
+  skills: z.array(z.string()).optional(),
+  experience: z.number().min(0).optional(),
+  resumeUrl: z.string().optional(),
+  tier: z.string().optional(),
+  credits: z.string().optional()
 })
+
+export type EditUserProfileFormData = z.infer<typeof EditUserProfileSchema>
 
 export const WorkflowFormSchema = z.object({
   name: z.string().min(1, 'Required'),

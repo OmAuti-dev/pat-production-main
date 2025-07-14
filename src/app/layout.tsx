@@ -4,7 +4,7 @@ import { Inter } from 'next/font/google'
 import { Providers } from '@/providers/providers'
 import { Metadata } from 'next'
 import { AuthSync } from '@/components/auth/auth-sync'
-import { Toaster } from '@/components/ui/sonner'
+import { Toaster } from 'sonner'
 
 const font = Inter({
   subsets: ['latin'],
@@ -27,6 +27,7 @@ export default function RootLayout({
       <html lang="en" suppressHydrationWarning>
         <head>
           <meta charSet="utf-8" />
+          <link rel="icon" href="/favicon.ico" sizes="any" />
         </head>
         <body className={`${font.className} antialiased`}>
           <Providers>

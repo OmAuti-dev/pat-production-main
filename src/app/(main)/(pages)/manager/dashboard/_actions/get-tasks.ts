@@ -2,28 +2,33 @@
 
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
+import { unassignTaskIfUserNotExists } from './task-actions'
 
 export async function getTasks() {
   try {
     const user = await currentUser()
-    if (!user) throw new Error('Not authenticated')
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
+    }
 
-    // Get user's role and ID
+    // Get user's database ID
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
       select: { id: true, role: true }
     })
 
-    if (!dbUser || dbUser.role !== 'MANAGER') {
-      throw new Error('Not authorized to view tasks')
+    if (!dbUser) {
+      return { success: false, error: 'User not found in database' }
     }
 
+    // Get all tasks
     const tasks = await db.task.findMany({
       include: {
         assignedTo: {
           select: {
+            id: true,
             name: true,
-            profileImage: true
+            role: true
           }
         },
         project: {
@@ -34,12 +39,31 @@ export async function getTasks() {
         }
       },
       orderBy: {
-        updatedAt: 'desc'
+        createdAt: 'desc'
       }
     })
 
-    // Transform tasks to match the expected format
-    const transformedTasks = tasks.map(task => ({
+    // Check each task's assigned user and unassign if user doesn't exist
+    const taskChecks = await Promise.all(
+      tasks.map(async task => {
+        if (task.assignedToId) {
+          const result = await unassignTaskIfUserNotExists(task.id)
+          if (result.unassigned) {
+            // Return the updated task data
+            return {
+              ...task,
+              assignedTo: null,
+              assignedToId: null,
+              status: 'PENDING'
+            }
+          }
+        }
+        return task
+      })
+    )
+
+    // Transform tasks to match the interface
+    const transformedTasks = taskChecks.map(task => ({
       id: task.id,
       title: task.title,
       description: task.description,
@@ -48,12 +72,12 @@ export async function getTasks() {
       deadline: task.deadline,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
-      creatorId: task.creatorId,
       assignedToId: task.assignedToId,
       projectId: task.projectId,
       assignedTo: task.assignedTo ? {
+        id: task.assignedTo.id,
         name: task.assignedTo.name,
-        profileImage: task.assignedTo.profileImage
+        role: task.assignedTo.role
       } : undefined,
       project: task.project ? {
         id: task.project.id,

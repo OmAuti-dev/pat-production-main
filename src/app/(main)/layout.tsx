@@ -3,6 +3,10 @@ import { currentUser } from '@clerk/nextjs'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import SidebarWrapper from '@/components/sidebar'
+import { Input } from '@/components/ui/input'
+import { Notifications } from '@/components/global/notifications'
+import { ModeToggle } from '@/components/global/mode-toggle'
+import { UserButton } from '@clerk/nextjs'
 
 export default async function MainLayout({
   children,
@@ -44,8 +48,18 @@ export default async function MainLayout({
         <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-fuchsia-400 opacity-20 blur-[100px]"></div>
       </div>
       <SidebarWrapper userRole={dbUser.role} />
-      <div className="flex-1 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        {children}
+      <div className="flex flex-col flex-1">
+        {/* <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-6 sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
+            <div className="flex-1">
+                <Input placeholder="Search..." />
+            </div>
+            <Notifications />
+            <ModeToggle />
+            <UserButton afterSignOutUrl="/" />
+        </header> */}
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </div>
     </main>
   )

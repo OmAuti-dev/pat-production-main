@@ -21,28 +21,6 @@ export async function getProjects() {
         managerId: dbUser.id
       },
       include: {
-        team: {
-          include: {
-            members: {
-              include: {
-                user: {
-                  select: {
-                    clerkId: true,
-                    name: true,
-                    profileImage: true,
-                    role: true,
-                    assignedTasks: {
-                      select: {
-                        id: true,
-                        status: true
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         tasks: {
           select: {
             id: true,
@@ -69,20 +47,6 @@ export async function getProjects() {
         updatedAt: project.updatedAt,
         managerId: project.managerId,
         clientId: project.clientId,
-        teamId: project.teamId,
-        team: project.team ? {
-          id: project.team.id,
-          name: project.team.name,
-          members: project.team.members.map(member => ({
-            user: {
-              clerkId: member.user.clerkId,
-              name: member.user.name,
-              profileImage: member.user.profileImage,
-              role: member.user.role,
-              assignedTasks: member.user.assignedTasks
-            }
-          }))
-        } : undefined,
         progress
       }
     })

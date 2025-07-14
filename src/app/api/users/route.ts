@@ -19,7 +19,7 @@ export async function GET() {
       return new NextResponse('Forbidden', { status: 403 })
     }
 
-    // Fetch all users
+    // Fetch all users with their project associations
     const users = await db.user.findMany({
       select: {
         id: true,
@@ -27,33 +27,70 @@ export async function GET() {
         name: true,
         email: true,
         role: true,
-        memberOfTeams: {
+        phoneNumber: true,
+        skills: true,
+        experience: true,
+        resumeUrl: true,
+        tier: true,
+        credits: true,
+        managedProjects: {
           select: {
-            team: {
-              select: {
-                projects: {
-                  select: {
-                    id: true
-                  }
-                }
-              }
-            }
+            id: true
+          }
+        },
+        clientProjects: {
+          select: {
+            id: true
+          }
+        },
+        assignedTasks: {
+          select: {
+            projectId: true
           }
         }
       }
     })
 
     // Transform the data to match the expected format
-    const formattedUsers = users.map(user => ({
-      id: user.id,
-      clerkId: user.clerkId,
-      name: user.name || '',
-      email: user.email,
-      role: user.role,
-      projects: user.memberOfTeams.flatMap(membership => 
-        membership.team.projects.map(project => project.id)
-      )
-    }))
+    const formattedUsers = users.map(user => {
+      // Get unique project IDs from all associations
+      const projectIds = new Set<string>()
+      
+      // Add projects from managed projects
+      user.managedProjects.forEach(p => projectIds.add(p.id))
+      
+      // Add projects from client projects
+      user.clientProjects.forEach(p => projectIds.add(p.id))
+      
+      // Add projects from assigned tasks
+      user.assignedTasks
+        .filter(t => t.projectId !== null)
+        .forEach(t => t.projectId && projectIds.add(t.projectId))
+
+      // Only include additional fields for non-client users
+      const baseUser = {
+        id: user.id,
+        clerkId: user.clerkId,
+        name: user.name || '',
+        email: user.email,
+        role: user.role,
+        phoneNumber: user.phoneNumber,
+        projects: Array.from(projectIds)
+      }
+
+      if (user.role !== 'CLIENT') {
+        return {
+          ...baseUser,
+          skills: user.skills,
+          experience: user.experience,
+          resumeUrl: user.resumeUrl,
+          tier: user.tier,
+          credits: user.credits
+        }
+      }
+
+      return baseUser
+    })
 
     return NextResponse.json(formattedUsers)
   } catch (error) {

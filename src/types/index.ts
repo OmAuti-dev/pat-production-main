@@ -20,7 +20,6 @@ export interface Project {
       user: {
         clerkId: string
         name: string | null
-        profileImage: string | null
         role: string
         assignedTasks: Array<{
           id: string
@@ -31,11 +30,11 @@ export interface Project {
   }
 }
 
-export interface Task {
+export interface BaseTask {
   id: string
   title: string
   description: string | null
-  status: 'TODO' | 'IN_PROGRESS' | 'DONE'
+  status: 'ASSIGNED' | 'ACCEPTED' | 'DECLINED' | 'PENDING' | 'IN_PROGRESS' | 'DONE'
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
   deadline: Date | null
   createdAt: Date
@@ -43,9 +42,15 @@ export interface Task {
   creatorId: string
   assignedToId: string | null
   projectId: string | null
+  declineReason?: string | null
+  requiredSkills: string[]
+}
+
+export interface Task extends BaseTask {
   assignedTo?: {
+    id: string
     name: string | null
-    profileImage: string | null
+    role: string
   }
   project?: {
     id: string
@@ -69,7 +74,6 @@ export interface Campaign {
 export interface ProjectMember {
   id: string
   name: string | null
-  profileImage: string | null
   role: string
   assignedTasks: number
   completedTasks: number

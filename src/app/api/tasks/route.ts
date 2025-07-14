@@ -159,8 +159,10 @@ export async function PUT(req: Request) {
       include: {
         assignedTo: {
           select: {
+            id: true,
             name: true,
-            profileImage: true
+            email: true,
+            role: true
           }
         },
         project: true

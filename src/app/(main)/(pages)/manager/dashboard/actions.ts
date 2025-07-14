@@ -2,70 +2,12 @@
 
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
-import type { DashboardData } from './types'
-
-export async function getDashboardData(): Promise<DashboardData> {
-  const user = await currentUser()
-  if (!user) throw new Error('Not authenticated')
-
-  // Get projects from database
-  const projects = await db.project.findMany({
-    orderBy: {
-      updatedAt: 'desc'
-    },
-    take: 3
-  })
-
-  // Get tasks from database
-  const tasks = await db.task.findMany({
-    include: {
-      assignedTo: true,
-      Project: true
-    },
-    orderBy: {
-      updatedAt: 'desc'
-    },
-    take: 5
-  })
-
-  // Get campaigns from database
-  const campaigns = await db.campaign.findMany({
-    orderBy: {
-      date: 'desc'
-    },
-    take: 2
-  })
-
-  // Calculate project completion stats
-  const projectStats = {
-    total: await db.project.count(),
-    completed: await db.project.count({
-      where: {
-        progress: 100
-      }
-    }),
-    inProgress: await db.project.count({
-      where: {
-        progress: {
-          gt: 0,
-          lt: 100
-        }
-      }
-    })
-  }
-
-  return {
-    projects,
-    tasks,
-    campaigns,
-    projectStats
-  }
-}
+import type { DashboardData, Task } from './types'
 
 export interface ProjectMember {
   id: string
+  clerkId: string
   name: string | null
-  profileImage: string | null
   role: string
   assignedTasks: number
   completedTasks: number
@@ -77,7 +19,7 @@ export async function getProjectMembers(projectId?: string) {
 
   const dbUser = await db.user.findUnique({
     where: { clerkId: user.id },
-    select: { role: true }
+    select: { id: true, role: true }
   })
 
   if (!dbUser) throw new Error("User not found")
@@ -88,98 +30,196 @@ export async function getProjectMembers(projectId?: string) {
   let members: ProjectMember[] = []
 
   if (projectId && projectId !== 'all') {
-    // Get members for a specific project
-    const project = await db.project.findUnique({
+    // Get all users who have tasks in this project
+    const users = await db.user.findMany({
       where: {
-        id: projectId,
-        managerId: user.id // Only get members from projects managed by this user
+        assignedTasks: {
+          some: {
+            projectId: projectId
+          }
+        }
       },
-      include: {
-        team: {
-          include: {
-            members: {
-              include: {
-                user: {
-                  include: {
-                    assignedTasks: {
-                      where: {
-                        projectId
-                      }
-                    }
-                  }
-                }
-              }
-            }
+      select: {
+        id: true,
+        clerkId: true,
+        name: true,
+        role: true,
+        assignedTasks: {
+          where: {
+            projectId: projectId
           }
         }
       }
     })
 
-    if (project?.team) {
-      members = project.team.members.map(member => ({
-        id: member.user.clerkId,
-        name: member.user.name,
-        profileImage: member.user.profileImage,
-        role: member.user.role,
-        assignedTasks: member.user.assignedTasks.length,
-        completedTasks: member.user.assignedTasks.filter(task => task.status === 'COMPLETED').length
-      }))
-    }
+    // Transform users into ProjectMember format
+    members = users.map(user => ({
+      id: user.id,
+      clerkId: user.clerkId,
+      name: user.name,
+      role: user.role,
+      assignedTasks: user.assignedTasks.length,
+      completedTasks: user.assignedTasks.filter(task => task.status === 'DONE').length
+    }))
   } else {
-    // Get all team members from projects managed by this user
-    const managedProjects = await db.project.findMany({
+    // Get all users who have tasks in any project managed by this user
+    const users = await db.user.findMany({
       where: {
-        managerId: user.id
+        assignedTasks: {
+          some: {
+            project: {
+              managerId: dbUser.id
+            }
+          }
+        }
       },
-      include: {
-        team: {
-          include: {
-            members: {
-              include: {
-                user: {
-                  include: {
-                    assignedTasks: true
-                  }
-                }
-              }
+      select: {
+        id: true,
+        clerkId: true,
+        name: true,
+        role: true,
+        assignedTasks: {
+          where: {
+            project: {
+              managerId: dbUser.id
             }
           }
         }
       }
     })
 
-    // Create a map to deduplicate members who might be in multiple projects
-    const memberMap = new Map<string, ProjectMember>()
-
-    managedProjects.forEach(project => {
-      if (project.team) {
-        project.team.members.forEach(teamMember => {
-          const member = teamMember.user
-          const existingMember = memberMap.get(member.clerkId)
-
-          if (existingMember) {
-            // Update task counts for existing member
-            existingMember.assignedTasks += member.assignedTasks.length
-            existingMember.completedTasks += member.assignedTasks.filter(task => task.status === 'COMPLETED').length
-          } else {
-            // Add new member
-            memberMap.set(member.clerkId, {
-              id: member.clerkId,
-              name: member.name,
-              profileImage: member.profileImage,
-              role: member.role,
-              assignedTasks: member.assignedTasks.length,
-              completedTasks: member.assignedTasks.filter(task => task.status === 'COMPLETED').length
-            })
-          }
-        })
-      }
-    })
-
-    members = Array.from(memberMap.values())
+    // Transform users into ProjectMember format
+    members = users.map(user => ({
+      id: user.id,
+      clerkId: user.clerkId,
+      name: user.name,
+      role: user.role,
+      assignedTasks: user.assignedTasks.length,
+      completedTasks: user.assignedTasks.filter(task => task.status === 'DONE').length
+    }))
   }
 
   return members
+}
+
+export async function getDashboardData(): Promise<DashboardData> {
+  const user = await currentUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const dbUser = await db.user.findUnique({
+    where: { clerkId: user.id },
+    select: { id: true, role: true }
+  })
+
+  if (!dbUser) throw new Error('User not found')
+  if (dbUser.role !== 'MANAGER' && dbUser.role !== 'ADMIN') {
+    throw new Error('Unauthorized')
+  }
+
+  // Get projects from database
+  const projects = await db.project.findMany({
+    where: {
+      managerId: dbUser.id
+    },
+    orderBy: {
+      updatedAt: 'desc'
+    },
+    take: 3,
+    include: {
+      tasks: true
+    }
+  })
+
+  // Get tasks from database
+  const tasks = await db.task.findMany({
+    where: {
+      project: {
+        managerId: dbUser.id
+      }
+    },
+    include: {
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+          role: true
+        }
+      },
+      project: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    },
+    orderBy: {
+      updatedAt: 'desc'
+    },
+    take: 5
+  })
+
+  // Calculate project completion stats
+  const projectStats = {
+    total: await db.project.count({
+      where: {
+        managerId: dbUser.id
+      }
+    }),
+    completed: await db.project.count({
+      where: {
+        managerId: dbUser.id,
+        status: 'DONE'
+      }
+    }),
+    inProgress: await db.project.count({
+      where: {
+        managerId: dbUser.id,
+        status: 'IN_PROGRESS'
+      }
+    })
+  }
+
+  // Transform projects to include progress
+  const transformedProjects = projects.map(project => {
+    const totalTasks = project.tasks.length
+    const completedTasks = project.tasks.filter(task => task.status === 'DONE').length
+    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+    return {
+      ...project,
+      progress
+    }
+  })
+
+  // Transform tasks to match the Task type
+  const transformedTasks = tasks.map(task => ({
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    deadline: task.deadline,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    creatorId: task.creatorId,
+    assignedToId: task.assignedToId,
+    projectId: task.projectId,
+    assignedTo: task.assignedTo ? {
+      id: task.assignedTo.id,
+      name: task.assignedTo.name,
+      role: task.assignedTo.role
+    } : undefined,
+    project: task.project ? {
+      id: task.project.id,
+      name: task.project.name
+    } : undefined
+  })) as Task[]
+
+  return {
+    projects: transformedProjects,
+    tasks: transformedTasks,
+    projectStats
+  }
 }
 
 export async function getProjects() {
@@ -188,7 +228,7 @@ export async function getProjects() {
 
   const dbUser = await db.user.findUnique({
     where: { clerkId: user.id },
-    select: { role: true }
+    select: { id: true, role: true }
   })
 
   if (!dbUser) throw new Error("User not found")
@@ -198,7 +238,7 @@ export async function getProjects() {
 
   const projects = await db.project.findMany({
     where: {
-      managerId: user.id
+      managerId: dbUser.id
     },
     select: {
       id: true,

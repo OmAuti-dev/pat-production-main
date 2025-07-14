@@ -262,7 +262,7 @@ export function ProjectDetailsWithMembers({
                       >
                         <div className="flex items-center gap-2">
                           <Avatar className="h-8 w-8">
-                            <AvatarImage src={member.profileImage || ""} />
+                            <AvatarImage src={undefined} />
                             <AvatarFallback>
                               {member.name?.charAt(0).toUpperCase()}
                             </AvatarFallback>

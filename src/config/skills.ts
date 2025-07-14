@@ -1,56 +1,154 @@
 export const skillCategories = {
-  'Programming Languages': [
-    'JavaScript', 'TypeScript', 'Python', 'Java', 'C#', 'C++', 'Ruby', 'PHP', 'Swift', 'Kotlin', 'Go', 'Rust'
-  ],
   'Frontend Development': [
-    'React', 'Vue.js', 'Angular', 'Next.js', 'HTML5', 'CSS3', 'SASS/SCSS', 'Tailwind CSS', 'Material UI', 'Bootstrap',
-    'Redux', 'Webpack', 'Vite', 'GraphQL', 'REST APIs', 'Responsive Design', 'Web Accessibility'
+    'React',
+    'Next.js',
+    'Vue.js',
+    'Angular',
+    'TypeScript',
+    'JavaScript',
+    'HTML5',
+    'CSS3',
+    'SASS/SCSS',
+    'Tailwind CSS',
+    'Material UI',
+    'Redux',
+    'Responsive Design',
+    'Web Performance',
+    'Progressive Web Apps'
   ],
   'Backend Development': [
-    'Node.js', 'Express.js', 'Django', 'Flask', 'Spring Boot', 'Laravel', 'ASP.NET Core', 'Ruby on Rails',
-    'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'GraphQL', 'RESTful APIs', 'Microservices'
+    'Node.js',
+    'Python',
+    'Java',
+    'C#',
+    'PHP',
+    'Ruby',
+    'Go',
+    'Express.js',
+    'Django',
+    'Spring Boot',
+    'ASP.NET Core',
+    'Laravel',
+    'Ruby on Rails',
+    'GraphQL',
+    'REST API Design'
   ],
-  'DevOps & Cloud': [
-    'AWS', 'Azure', 'Google Cloud', 'Docker', 'Kubernetes', 'Jenkins', 'GitLab CI/CD', 'GitHub Actions',
-    'Terraform', 'Ansible', 'Linux', 'Nginx', 'Apache'
+  'Database': [
+    'PostgreSQL',
+    'MySQL',
+    'MongoDB',
+    'Redis',
+    'Elasticsearch',
+    'SQL Server',
+    'Oracle',
+    'Firebase',
+    'DynamoDB',
+    'Cassandra',
+    'Database Design',
+    'Data Modeling',
+    'Query Optimization'
   ],
-  'Mobile Development': [
-    'React Native', 'Flutter', 'iOS Development', 'Android Development', 'Xamarin', 'Mobile UI Design',
-    'App Store Optimization', 'Mobile Security'
-  ],
-  'Testing & QA': [
-    'Jest', 'Cypress', 'Selenium', 'JUnit', 'TestNG', 'Mocha', 'Manual Testing', 'Automated Testing',
-    'Performance Testing', 'Security Testing'
-  ],
-  'Design & UI/UX': [
-    'Figma', 'Adobe XD', 'Sketch', 'UI Design', 'UX Design', 'Wireframing', 'Prototyping',
-    'User Research', 'Design Systems'
+  'DevOps & Infrastructure': [
+    'Docker',
+    'Kubernetes',
+    'AWS',
+    'Azure',
+    'Google Cloud',
+    'Linux',
+    'CI/CD',
+    'Jenkins',
+    'GitHub Actions',
+    'Terraform',
+    'Ansible',
+    'Monitoring',
+    'Logging',
+    'Security',
+    'Performance Tuning'
   ],
   'Project Management': [
-    'Agile', 'Scrum', 'Kanban', 'JIRA', 'Confluence', 'Risk Management', 'Stakeholder Management',
-    'Team Leadership', 'Sprint Planning'
+    'Agile',
+    'Scrum',
+    'Kanban',
+    'JIRA',
+    'Confluence',
+    'Risk Management',
+    'Stakeholder Management',
+    'Resource Planning',
+    'Sprint Planning',
+    'Project Estimation'
   ],
-  'Security': [
-    'Cybersecurity', 'Penetration Testing', 'Security Auditing', 'OAuth', 'JWT', 'SSL/TLS',
-    'Encryption', 'Security Best Practices'
+  'Design & UX': [
+    'UI Design',
+    'UX Design',
+    'Figma',
+    'Adobe XD',
+    'Sketch',
+    'Wireframing',
+    'Prototyping',
+    'User Research',
+    'Usability Testing',
+    'Information Architecture',
+    'Design Systems'
   ],
-  'Data Science & AI': [
-    'Machine Learning', 'Deep Learning', 'TensorFlow', 'PyTorch', 'Data Analysis',
-    'Natural Language Processing', 'Computer Vision', 'Data Visualization'
+  'Quality Assurance': [
+    'Manual Testing',
+    'Automated Testing',
+    'Jest',
+    'Cypress',
+    'Selenium',
+    'Test Planning',
+    'Test Cases',
+    'Performance Testing',
+    'Security Testing',
+    'API Testing',
+    'Load Testing'
   ],
-  'Version Control': [
-    'Git', 'GitHub', 'GitLab', 'Bitbucket', 'Branch Management', 'Code Review'
+  'Mobile Development': [
+    'React Native',
+    'Flutter',
+    'iOS Development',
+    'Android Development',
+    'Swift',
+    'Kotlin',
+    'Mobile UI Design',
+    'App Performance',
+    'Mobile Security',
+    'Push Notifications'
+  ],
+  'AI & Machine Learning': [
+    'Machine Learning',
+    'Deep Learning',
+    'Natural Language Processing',
+    'Computer Vision',
+    'TensorFlow',
+    'PyTorch',
+    'Data Analysis',
+    'Statistical Analysis',
+    'Model Training',
+    'AI Integration'
   ],
   'Soft Skills': [
-    'Communication', 'Problem Solving', 'Team Collaboration', 'Time Management',
-    'Critical Thinking', 'Adaptability', 'Leadership'
+    'Communication',
+    'Problem Solving',
+    'Team Leadership',
+    'Time Management',
+    'Critical Thinking',
+    'Collaboration',
+    'Adaptability',
+    'Mentoring',
+    'Presentation Skills',
+    'Technical Writing'
   ]
 } as const
 
-export type SkillCategory = keyof typeof skillCategories
-export type Skill = typeof allSkills[number]
-
+// Create a flat array of all skills for easy lookup
 export const allSkills = Object.values(skillCategories).flat()
+
+// Type for skill categories
+export type SkillCategory = keyof typeof skillCategories
+
+// Type for individual skills
+export type Skill = typeof allSkills[number]
 
 export const isValidSkill = (skill: string): skill is Skill => {
   return allSkills.includes(skill as Skill)

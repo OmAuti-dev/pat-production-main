@@ -67,13 +67,11 @@ export async function POST(req: Request) {
           clerkId: id,
           email: email,
           name: `${attributes.first_name || ''} ${attributes.last_name || ''}`.trim(),
-          profileImage: attributes.image_url,
           role: 'CLIENT' // Always set CLIENT role for new users
         },
         update: {
           email: email,
-          name: `${attributes.first_name || ''} ${attributes.last_name || ''}`.trim(),
-          profileImage: attributes.image_url
+          name: `${attributes.first_name || ''} ${attributes.last_name || ''}`.trim()
           // Don't update role here to preserve existing role
         }
       });

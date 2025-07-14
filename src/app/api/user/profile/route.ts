@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs'
 import { db } from '@/lib/db'
-import { isValidSkill } from '@/config/skills'
+import { Role } from '@prisma/client'
 
 export async function GET() {
   try {
@@ -16,9 +16,12 @@ export async function GET() {
         name: true,
         email: true,
         phoneNumber: true,
+        role: true,
         skills: true,
         experience: true,
-        resumeUrl: true
+        resumeUrl: true,
+        tier: true,
+        credits: true
       }
     })
 
@@ -26,7 +29,15 @@ export async function GET() {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
 
-    return NextResponse.json(profile)
+    // Ensure all fields have default values
+    return NextResponse.json({
+      ...profile,
+      skills: profile.skills || [],
+      experience: profile.experience || 0,
+      resumeUrl: profile.resumeUrl || '',
+      tier: profile.tier || 'Free',
+      credits: profile.credits || '10'
+    })
   } catch (error) {
     console.error('Error fetching profile:', error)
     return NextResponse.json(
@@ -38,41 +49,43 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const user = await currentUser()
-    if (!user) {
+    const clerkUser = await currentUser()
+    if (!clerkUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const data = await request.json()
-    
-    // Validate skills
-    if (data.skills && Array.isArray(data.skills)) {
-      const invalidSkills = data.skills.filter((skill: string) => !isValidSkill(skill))
-      if (invalidSkills.length > 0) {
-        return NextResponse.json(
-          { error: `Invalid skills: ${invalidSkills.join(', ')}` },
-          { status: 400 }
-        )
-      }
+
+    // Get the user's role
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: clerkUser.id },
+      select: { role: true }
+    })
+
+    if (!dbUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Validate experience
-    if (typeof data.experience !== 'number' || data.experience < 0) {
-      return NextResponse.json(
-        { error: 'Experience must be a non-negative number' },
-        { status: 400 }
-      )
+    // Base update data
+    const updateData = {
+      name: data.name,
+      phoneNumber: data.phoneNumber || null
+    }
+
+    // Add additional fields for non-client users
+    if (dbUser.role !== Role.CLIENT) {
+      Object.assign(updateData, {
+        skills: Array.isArray(data.skills) ? data.skills : [],
+        experience: typeof data.experience === 'number' ? data.experience : 0,
+        resumeUrl: data.resumeUrl || null,
+        tier: data.tier || 'Free',
+        credits: data.credits || '10'
+      })
     }
 
     const updatedProfile = await db.user.update({
-      where: { clerkId: user.id },
-      data: {
-        name: data.name,
-        phoneNumber: data.phoneNumber,
-        skills: data.skills,
-        experience: data.experience,
-        resumeUrl: data.resumeUrl
-      }
+      where: { clerkId: clerkUser.id },
+      data: updateData
     })
 
     return NextResponse.json(updatedProfile)

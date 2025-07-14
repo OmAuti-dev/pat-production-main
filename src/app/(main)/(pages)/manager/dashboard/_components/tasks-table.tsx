@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { MoreHorizontal, Pencil, Trash2, UserMinus } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2, UserMinus, AlertCircle } from 'lucide-react'
 import { Task } from '../types'
 import {
   DropdownMenu,
@@ -22,12 +22,17 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
+import { TaskActionsMenu } from '@/components/task-actions-menu'
+import { startTask } from '../_actions/task-actions'
+import { toast } from 'sonner'
 
 interface TasksTableProps {
   tasks: Task[]
-  onEdit: (taskId: string) => void
+  onEdit: (task: Task) => void
   onDelete: (taskId: string) => void
   onUnassign: (taskId: string) => void
+  selectedProject?: string
+  onSelectedTasksChange?: (selectedTasks: Set<string>) => void
 }
 
 const statusColorMap: Record<string, string> = {
@@ -42,24 +47,46 @@ const priorityColorMap: Record<string, string> = {
   'HIGH': 'bg-red-500/20 text-red-500'
 }
 
-export function TasksTable({ tasks, onEdit, onDelete, onUnassign }: TasksTableProps) {
-  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+export function TasksTable({ 
+  tasks, 
+  onEdit, 
+  onDelete, 
+  onUnassign, 
+  selectedProject,
+  onSelectedTasksChange 
+}: TasksTableProps) {
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
-  const toggleTaskSelection = (taskId: string) => {
-    const newSelection = new Set(selectedTasks)
-    if (newSelection.has(taskId)) {
-      newSelection.delete(taskId)
+  const handleRowSelect = (taskId: string) => {
+    const newSelected = new Set(selectedRows)
+    if (newSelected.has(taskId)) {
+      newSelected.delete(taskId)
     } else {
-      newSelection.add(taskId)
+      newSelected.add(taskId)
     }
-    setSelectedTasks(newSelection)
+    setSelectedRows(newSelected)
+    onSelectedTasksChange?.(newSelected)
   }
 
-  const toggleAllTasks = () => {
-    if (selectedTasks.size === tasks.length) {
-      setSelectedTasks(new Set())
+  const handleSelectAll = () => {
+    if (selectedRows.size === tasks.length) {
+      setSelectedRows(new Set())
+      onSelectedTasksChange?.(new Set())
     } else {
-      setSelectedTasks(new Set(tasks.map(task => task.id)))
+      const newSelected = new Set(tasks.map(task => task.id))
+      setSelectedRows(newSelected)
+      onSelectedTasksChange?.(newSelected)
+    }
+  }
+
+  const handleStartTask = async (taskId: string) => {
+    try {
+      const result = await startTask(taskId)
+      if (!result.success) {
+        toast.error(result.error || 'Failed to start task')
+      }
+    } catch (error) {
+      toast.error('Failed to start task')
     }
   }
 
@@ -67,40 +94,64 @@ export function TasksTable({ tasks, onEdit, onDelete, onUnassign }: TasksTablePr
     <div className="rounded-md border">
       <Table>
         <TableHeader>
+          {selectedProject && selectedProject !== 'all' && (
+            <TableRow>
+              <TableHead className="w-[50px]">
+                <Checkbox
+                  checked={selectedRows.size === tasks.length && tasks.length > 0}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all tasks"
+                />
+              </TableHead>
+            </TableRow>
+          )}
           <TableRow>
-            <TableHead className="w-[50px]">
-              <Checkbox
-                checked={selectedTasks.size === tasks.length && tasks.length > 0}
-                onCheckedChange={toggleAllTasks}
-                aria-label="Select all tasks"
-              />
-            </TableHead>
             <TableHead>Title</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Priority</TableHead>
             <TableHead>Assigned To</TableHead>
+            <TableHead>Project</TableHead>
             <TableHead>Deadline</TableHead>
-            <TableHead className="w-[70px]"></TableHead>
+            <TableHead>Required Skills</TableHead>
+            <TableHead className="w-[100px]">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {tasks.map((task) => (
             <TableRow key={task.id}>
-              <TableCell>
-                <Checkbox
-                  checked={selectedTasks.has(task.id)}
-                  onCheckedChange={() => toggleTaskSelection(task.id)}
-                  aria-label={`Select task ${task.title}`}
-                />
-              </TableCell>
+              {selectedProject && selectedProject !== 'all' && (
+                <TableCell>
+                  <Checkbox
+                    checked={selectedRows.has(task.id)}
+                    onCheckedChange={() => handleRowSelect(task.id)}
+                    aria-label={`Select task ${task.title}`}
+                  />
+                </TableCell>
+              )}
               <TableCell>{task.title}</TableCell>
               <TableCell>
-                <Badge className={statusColorMap[task.status] || 'bg-gray-500/20 text-gray-500'}>
+                <Badge
+                  variant={
+                    task.status === 'DONE'
+                      ? 'default'
+                      : task.status === 'IN_PROGRESS'
+                      ? 'secondary'
+                      : 'outline'
+                  }
+                >
                   {task.status}
                 </Badge>
               </TableCell>
               <TableCell>
-                <Badge className={priorityColorMap[task.priority] || 'bg-gray-500/20 text-gray-500'}>
+                <Badge
+                  variant={
+                    task.priority === 'HIGH'
+                      ? 'destructive'
+                      : task.priority === 'MEDIUM'
+                      ? 'default'
+                      : 'secondary'
+                  }
+                >
                   {task.priority}
                 </Badge>
               </TableCell>
@@ -108,48 +159,52 @@ export function TasksTable({ tasks, onEdit, onDelete, onUnassign }: TasksTablePr
                 {task.assignedTo ? (
                   <div className="flex items-center gap-2">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={task.assignedTo.profileImage || undefined} />
                       <AvatarFallback>
-                        {task.assignedTo.name?.[0] || '?'}
+                        {task.assignedTo.name?.[0] || 'U'}
                       </AvatarFallback>
                     </Avatar>
-                    <span>{task.assignedTo.name || 'Unknown'}</span>
+                    <span className="text-sm">
+                      {task.assignedTo.name || 'Unnamed User'}
+                    </span>
                   </div>
                 ) : (
-                  <span className="text-gray-500">Not Assigned</span>
+                  <span className="text-muted-foreground">Unassigned</span>
                 )}
               </TableCell>
               <TableCell>
-                {task.deadline ? format(new Date(task.deadline), 'MMM d, yyyy') : 'No deadline'}
+                {task.project ? (
+                  task.project.name
+                ) : (
+                  <span className="text-muted-foreground">No Project</span>
+                )}
               </TableCell>
               <TableCell>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 w-8 p-0">
-                      <span className="sr-only">Open menu</span>
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => onEdit(task.id)}>
-                      <Pencil className="mr-2 h-4 w-4" />
-                      Edit
-                    </DropdownMenuItem>
-                    {task.assignedTo && (
-                      <DropdownMenuItem onClick={() => onUnassign(task.id)}>
-                        <UserMinus className="mr-2 h-4 w-4" />
-                        Unassign
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem 
-                      onClick={() => onDelete(task.id)}
-                      className="text-red-600"
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Remove
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {task.deadline ? (
+                  format(new Date(task.deadline), 'MMM d, yyyy')
+                ) : (
+                  <span className="text-muted-foreground">No deadline</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1">
+                  {task.requiredSkills?.length > 0 ? (
+                    task.requiredSkills.map((skill) => (
+                      <Badge key={skill} variant="outline" className="text-xs">
+                        {skill}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground">No required skills</span>
+                  )}
+                </div>
+              </TableCell>
+              <TableCell>
+                <TaskActionsMenu
+                  task={task}
+                  onEdit={() => onEdit(task)}
+                  onDelete={() => onDelete(task.id)}
+                  onUnassign={() => onUnassign(task.id)}
+                />
               </TableCell>
             </TableRow>
           ))}

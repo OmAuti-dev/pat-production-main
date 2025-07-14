@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Rating } from "@/components/ui/rating"
-import { Link2, MessageSquare } from 'lucide-react'
+import { Link2, MessageSquare, Clock, CheckCircle2, CircleDashed } from 'lucide-react'
 import { Project as BaseProject, Task as BaseTask } from '@/types'
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { MoreHorizontal } from 'lucide-react'
@@ -41,6 +41,7 @@ type Task = BaseTask & {
   }
   comments: Comment[]
   resourceUrl?: string | null
+  status: 'PENDING' | 'IN_PROGRESS' | 'DONE'
 }
 
 type Project = BaseProject & {
@@ -50,9 +51,30 @@ type Project = BaseProject & {
 }
 
 const statusColumns = [
-  { id: 'TODO', title: 'To Do' },
-  { id: 'IN_PROGRESS', title: 'In Progress' },
-  { id: 'DONE', title: 'Completed' }
+  { 
+    id: 'PENDING', 
+    title: 'Pending', 
+    icon: CircleDashed,
+    description: 'Tasks that need to be started',
+    color: 'bg-yellow-500/10 border-yellow-500/20 hover:border-yellow-500/30',
+    textColor: 'text-yellow-500'
+  },
+  { 
+    id: 'IN_PROGRESS', 
+    title: 'In Progress', 
+    icon: Clock,
+    description: 'Tasks currently being worked on',
+    color: 'bg-blue-500/10 border-blue-500/20 hover:border-blue-500/30',
+    textColor: 'text-blue-500'
+  },
+  { 
+    id: 'DONE', 
+    title: 'Completed', 
+    icon: CheckCircle2,
+    description: 'Tasks that have been completed',
+    color: 'bg-green-500/10 border-green-500/20 hover:border-green-500/30',
+    textColor: 'text-green-500'
+  }
 ]
 
 const priorityColorMap: Record<string, string> = {
@@ -156,8 +178,6 @@ export default function KanbanPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [isTaskDetailsOpen, setIsTaskDetailsOpen] = useState(false)
-  const [isAddingComment, setIsAddingComment] = useState(false)
-  const [commentContent, setCommentContent] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -176,13 +196,22 @@ export default function KanbanPage() {
       }
     }
 
+    loadProjects()
+  }, [])
+
+  useEffect(() => {
     const loadTasks = async () => {
+      if (!selectedProject) {
+        setTasks([])
+        return
+      }
+
       try {
         const result = await getProjectTasks(selectedProject)
         if (result.success && result.tasks) {
           setTasks(result.tasks.map((task: any) => ({
             ...task,
-            status: task.status as 'TODO' | 'IN_PROGRESS' | 'DONE',
+            status: task.status === 'TODO' ? 'PENDING' : task.status || 'PENDING',
             assignedTo: {
               name: task.assignedTo?.name || null,
               profileImage: task.assignedTo?.profileImage || null
@@ -191,8 +220,7 @@ export default function KanbanPage() {
               id: task.project?.id || '',
               name: task.project?.name || ''
             },
-            comments: task.comments || [],
-            resourceUrl: task.resourceUrl || undefined
+            comments: (task.project?.comments || []).filter((comment: any) => comment !== undefined)
           })))
         } else {
           toast.error(result.error || 'Failed to load tasks')
@@ -201,201 +229,185 @@ export default function KanbanPage() {
       } catch (error) {
         console.error('Failed to load tasks:', error)
         toast.error('Failed to load tasks')
-        setTasks([])
       }
     }
 
-    loadProjects()
     loadTasks()
   }, [selectedProject])
 
-  const handleProjectChange = async (projectId: string) => {
+  const handleProjectChange = (projectId: string) => {
     setSelectedProject(projectId)
-    setIsTaskDetailsOpen(false)
-    setIsAddingComment(false)
-    setCommentContent('')
-    setSelectedTask(null)
-    setTasks([])
   }
 
   const getTasksByStatus = (status: string) => {
     return tasks.filter(task => task.status === status)
   }
 
-  const handleDragEnd = async (result: DropResult) => {
+  const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return
 
-    const updatedTasks = Array.from(tasks)
-    const [reorderedTask] = updatedTasks.splice(result.source.index, 1)
-    updatedTasks.splice(result.destination.index, 0, {
-      ...reorderedTask,
-      status: result.destination.droppableId as 'TODO' | 'IN_PROGRESS' | 'DONE'
-    })
+    const sourceStatus = result.source.droppableId
+    const destinationStatus = result.destination.droppableId
+    
+    if (sourceStatus === destinationStatus) return
 
-    setTasks(updatedTasks)
+    const taskId = result.draggableId
+    const task = tasks.find(t => t.id === taskId)
+    
+    if (!task) return
 
-    try {
-      await updateKanbanTaskStatus(reorderedTask.id, result.destination.droppableId)
-      router.refresh()
-      toast.success('Task status updated')
-    } catch (error) {
-      console.error('Error updating task:', error)
-      toast.error('Failed to update task')
-    }
-  }
+    // Update task status locally without persisting to DB
+    setTasks(prevTasks => 
+      prevTasks.map(t => 
+        t.id === taskId 
+          ? { ...t, status: destinationStatus }
+          : t
+      )
+    )
 
-  const handleAddComment = async () => {
-    if (!selectedTask || !commentContent.trim()) return
-
-    setIsAddingComment(true)
-
-    try {
-      const result = await addTaskComment(selectedTask.id, commentContent)
-      if (result.success) {
-        setTasks(tasks.map(task =>
-          task.id === selectedTask.id
-            ? {
-                ...task,
-                comments: [result.comment, ...task.comments]
-              }
-            : task
-        ))
-        setCommentContent('')
-        toast.success('Comment added successfully')
-      } else {
-        toast.error(result.error || 'Failed to add comment')
-      }
-    } catch (error) {
-      console.error('Error adding comment:', error)
-      toast.error('Failed to add comment')
-    } finally {
-      setIsAddingComment(false)
-    }
-  }
-
-  const handleAddResourceUrl = async (taskId: string, url: string) => {
-    try {
-      const result = await updateTaskResourceUrl(taskId, url)
-      if (result.success) {
-        setTasks(tasks.map(task =>
-          task.id === taskId
-            ? {
-                ...task,
-                resourceUrl: url
-              }
-            : task
-        ))
-        toast.success('Resource URL added successfully')
-      } else {
-        toast.error(result.error || 'Failed to add resource URL')
-      }
-    } catch (error) {
-      console.error('Error adding resource URL:', error)
-      toast.error('Failed to add resource URL')
-    }
+    toast.success(`Task moved to ${destinationStatus.toLowerCase().replace('_', ' ')}`)
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-4xl font-bold">Kanban Board</h1>
-        <Select value={selectedProject} onValueChange={handleProjectChange}>
-          <SelectTrigger className="w-[280px]">
-            <SelectValue placeholder="Select a project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map(project => (
-              <SelectItem key={project.id} value={project.id}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="flex flex-col h-full">
+      <div className="p-6 border-b">
+        <div className="flex items-center gap-4">
+          <Select
+            value={selectedProject}
+            onValueChange={handleProjectChange}
+          >
+            <SelectTrigger className="w-[300px]">
+              <SelectValue placeholder="Select a project" />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {tasks.length === 0 ? (
-        <div className="text-center text-muted-foreground py-12">
-          Select a project to view its tasks
-        </div>
-      ) : (
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-3 gap-6">
-            {statusColumns.map(column => (
-              <Card key={column.id}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    {column.title}
-                    <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 rounded-full">
-                      {getTasksByStatus(column.id).length}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Droppable droppableId={column.id}>
-                    {(provided: DroppableProvided) => (
-                      <div
-                        {...provided.droppableProps}
-                        ref={provided.innerRef}
-                        className="space-y-4"
-                      >
-                        {getTasksByStatus(column.id).map((task, index) => (
-                          <Draggable
-                            key={task.id}
-                            draggableId={task.id}
-                            index={index}
-                          >
-                            {(provided: DraggableProvided) => (
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <div
-                                    ref={provided.innerRef}
-                                    {...provided.draggableProps}
-                                    {...provided.dragHandleProps}
-                                    className="bg-card border rounded-lg p-4 space-y-2 cursor-grab hover:shadow-md transition-shadow"
-                                  >
-                                    <h3 className="font-medium">{task.title}</h3>
-                                    <div className="flex items-center justify-between text-sm text-muted-foreground">
-                                      <span>Assigned to: {task.assignedTo.name || 'Unassigned'}</span>
-                                      <div className="flex items-center gap-2">
-                                        {task.resourceUrl && (
-                                          <Link2 className="h-4 w-4" />
-                                        )}
-                                        {task.comments.length ? (
-                                          <div className="flex items-center gap-1">
-                                            <MessageSquare className="h-4 w-4" />
-                                            <span>{task.comments.length}</span>
-                                          </div>
-                                        ) : null}
-                                        <Badge className={priorityColorMap[task.priority] || 'bg-gray-500/20 text-gray-500'}>
-                                          {task.priority}
-                                        </Badge>
-                                      </div>
+      <DragDropContext onDragEnd={handleDragEnd}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
+          {statusColumns.map((column) => {
+            const Icon = column.icon
+            return (
+              <Droppable key={column.id} droppableId={column.id}>
+                {(provided) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className={`flex flex-col rounded-lg border ${column.color}`}
+                  >
+                    <div className="p-4 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <Icon className={`w-5 h-5 ${column.textColor}`} />
+                        <h3 className="font-semibold">{column.title}</h3>
+                        <Badge variant="secondary" className="ml-auto">
+                          {getTasksByStatus(column.id).length}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {column.description}
+                      </p>
+                    </div>
+                    <div className="p-4 flex-1 space-y-4">
+                      {getTasksByStatus(column.id).map((task, index) => (
+                        <Draggable
+                          key={task.id}
+                          draggableId={task.id}
+                          index={index}
+                        >
+                          {(provided) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              {...provided.dragHandleProps}
+                              className="group"
+                            >
+                              <Card className="border border-border/50 hover:border-border transition-colors">
+                                <CardContent className="p-4 space-y-3">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <h4 className="font-medium line-clamp-2">
+                                      {task.title}
+                                    </h4>
+                                    <Badge
+                                      className={priorityColorMap[task.priority]}
+                                    >
+                                      {task.priority}
+                                    </Badge>
+                                  </div>
+                                  {task.description && (
+                                    <p className="text-sm text-muted-foreground line-clamp-2">
+                                      {task.description}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center justify-between text-sm">
+                                    <div className="flex items-center gap-2">
+                                      {task.assignedTo?.name && (
+                                        <Avatar className="h-6 w-6">
+                                          <AvatarImage src={task.assignedTo.profileImage || ''} />
+                                          <AvatarFallback>
+                                            {task.assignedTo.name.charAt(0)}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                      )}
+                                      <span className="text-muted-foreground">
+                                        {task.deadline ? format(new Date(task.deadline), 'MMM d') : 'No deadline'}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-muted-foreground">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                                        onClick={() => {
+                                          setSelectedTask(task)
+                                          setIsTaskDetailsOpen(true)
+                                        }}
+                                      >
+                                        <MessageSquare className="h-4 w-4" />
+                                      </Button>
                                     </div>
                                   </div>
-                                </DialogTrigger>
-                                <DialogContent>
-                                  <DialogHeader>
-                                    <DialogTitle>{task.title}</DialogTitle>
-                                  </DialogHeader>
-                                  <TaskDetails
-                                    task={task}
-                                    onAddComment={handleAddComment}
-                                    onAddResourceUrl={handleAddResourceUrl}
-                                  />
-                                </DialogContent>
-                              </Dialog>
-                            )}
-                          </Draggable>
-                        ))}
-                        {provided.placeholder}
-                      </div>
-                    )}
-                  </Droppable>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </DragDropContext>
+                                </CardContent>
+                              </Card>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  </div>
+                )}
+              </Droppable>
+            )
+          })}
+        </div>
+      </DragDropContext>
+
+      {selectedTask && (
+        <Dialog open={isTaskDetailsOpen} onOpenChange={setIsTaskDetailsOpen}>
+          <DialogContent className="max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>{selectedTask.title}</DialogTitle>
+            </DialogHeader>
+            <TaskDetails
+              task={selectedTask}
+              onAddComment={async (taskId, content, rating) => {
+                // Handle comment addition
+                setIsTaskDetailsOpen(false)
+              }}
+              onAddResourceUrl={async (taskId, url) => {
+                // Handle resource URL addition
+                setIsTaskDetailsOpen(false)
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )

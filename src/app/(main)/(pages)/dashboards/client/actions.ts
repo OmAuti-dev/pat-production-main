@@ -20,11 +20,10 @@ export interface Project {
 export interface Comment {
   id: string
   content: string
-  rating?: number
+  rating: number | undefined
   createdAt: string
   user: {
     name: string | null
-    profileImage: string | null
   }
 }
 
@@ -135,16 +134,15 @@ export async function getProjects() {
   return projects
 }
 
-export async function getProjectComments(projectId: string) {
-  const comments = await db.comment.findMany({
+export async function getProjectComments(projectId: string): Promise<Comment[]> {
+  const comments = await db.projectComment.findMany({
     where: {
       projectId
     },
     include: {
       user: {
         select: {
-          name: true,
-          profileImage: true
+          name: true
         }
       }
     },
@@ -156,31 +154,35 @@ export async function getProjectComments(projectId: string) {
   return comments.map(comment => ({
     id: comment.id,
     content: comment.content,
-    rating: comment.rating,
+    rating: comment.rating || undefined,
     createdAt: comment.createdAt.toISOString(),
     user: {
-      name: comment.user.name,
-      profileImage: comment.user.profileImage
+      name: comment.user.name
     }
   }))
 }
 
-export async function addProjectComment(projectId: string, content: string, rating?: number) {
+export async function addProjectComment(projectId: string, content: string, rating?: number): Promise<Comment> {
   const user = await currentUser()
   if (!user) throw new Error("Not authenticated")
 
-  const comment = await db.comment.create({
+  const dbUser = await db.user.findUnique({
+    where: { clerkId: user.id }
+  })
+
+  if (!dbUser) throw new Error("User not found")
+
+  const comment = await db.projectComment.create({
     data: {
       content,
       rating,
       projectId,
-      userId: user.id
+      userId: dbUser.id
     },
     include: {
       user: {
         select: {
-          name: true,
-          profileImage: true
+          name: true
         }
       }
     }
@@ -189,11 +191,10 @@ export async function addProjectComment(projectId: string, content: string, rati
   return {
     id: comment.id,
     content: comment.content,
-    rating: comment.rating,
+    rating: comment.rating || undefined,
     createdAt: comment.createdAt.toISOString(),
     user: {
-      name: comment.user.name,
-      profileImage: comment.user.profileImage
+      name: comment.user.name
     }
   }
 }
@@ -202,71 +203,52 @@ export async function getDashboardData() {
   const user = await currentUser()
   if (!user) throw new Error("Not authenticated")
 
-  // Get the user's internal database ID
   const dbUser = await db.user.findUnique({
     where: { clerkId: user.id },
-    select: { 
-      id: true,
-      name: true,
-      role: true
-    }
-  })
-
-  if (!dbUser || dbUser.role !== 'CLIENT') {
-    throw new Error("Not authorized to view client dashboard")
-  }
-
-  // Get all projects where the user is the client
-  const projects = await db.project.findMany({
-    where: {
-      clientId: dbUser.id
-    },
     include: {
-      team: {
+      clientProjects: {
         include: {
-          members: {
-            include: {
-              user: {
+          tasks: {
+            select: {
+              id: true,
+              status: true,
+              assignedTo: {
                 select: {
                   id: true,
                   name: true,
-                  profileImage: true,
                   role: true
                 }
               }
             }
           }
         }
-      },
-      tasks: true
+      }
     }
   })
 
-  // Transform projects to include progress
-  const transformedProjects = projects.map(project => {
-    const totalTasks = project.tasks.length
-    const completedTasks = project.tasks.filter(task => task.status === 'DONE').length
-    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  if (!dbUser) throw new Error("User not found")
 
-    return {
-      id: project.id,
-      name: project.name,
-      description: project.description,
-      status: project.status,
-      startDate: project.startDate,
-      endDate: project.endDate,
-      progress,
-      team: project.team,
-      tasks: project.tasks
-    }
-  })
+  // Transform projects data
+  const transformedProjects = dbUser.clientProjects.map(project => ({
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    startDate: project.startDate,
+    endDate: project.endDate,
+    progress: calculateProgress(project.tasks),
+    tasks: project.tasks.map(task => ({
+      id: task.id,
+      status: task.status
+    }))
+  }))
 
-  // Calculate dashboard stats
+  // Calculate stats
   const stats = {
-    totalProjects: projects.length,
-    inProgressProjects: projects.filter(p => p.status === 'IN_PROGRESS').length,
-    completedProjects: projects.filter(p => p.status === 'COMPLETED').length,
-    onHoldProjects: projects.filter(p => p.status === 'ON_HOLD').length
+    totalProjects: transformedProjects.length,
+    inProgressProjects: transformedProjects.filter(p => p.status === 'IN_PROGRESS').length,
+    completedProjects: transformedProjects.filter(p => p.status === 'DONE').length,
+    onHoldProjects: transformedProjects.filter(p => p.status === 'PENDING').length
   }
 
   return {
@@ -279,4 +261,10 @@ export async function getDashboardData() {
     projects: transformedProjects,
     stats
   }
+}
+
+function calculateProgress(tasks: { status: string }[]): number {
+  if (tasks.length === 0) return 0
+  const completedTasks = tasks.filter(task => task.status === 'DONE').length
+  return Math.round((completedTasks / tasks.length) * 100)
 } 

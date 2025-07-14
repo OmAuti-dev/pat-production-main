@@ -10,20 +10,19 @@ type TaskWithRelations = Prisma.TaskGetPayload<{
     assignedTo: {
       select: {
         name: true
-        profileImage: true
       }
     }
-    Project: {
+    project: {
       select: {
+        id: true
         name: true
-      }
-    }
-    comments: {
-      include: {
-        user: {
-          select: {
-            name: true
-            profileImage: true
+        comments: {
+          include: {
+            user: {
+              select: {
+                name: true
+              }
+            }
           }
         }
       }
@@ -34,26 +33,25 @@ type TaskWithRelations = Prisma.TaskGetPayload<{
 const taskInclude = {
   assignedTo: {
     select: {
-      name: true,
-      profileImage: true
-    }
-  },
-  Project: {
-    select: {
       name: true
     }
   },
-  comments: {
-    include: {
-      user: {
-        select: {
-          name: true,
-          profileImage: true
+  project: {
+    select: {
+      id: true,
+      name: true,
+      comments: {
+        include: {
+          user: {
+            select: {
+              name: true
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc' as const
         }
       }
-    },
-    orderBy: {
-      createdAt: 'desc' as const
     }
   }
 } satisfies Prisma.TaskInclude
@@ -68,21 +66,56 @@ export async function getProjectTasks(projectId: string) {
     // Get user's role
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
-      select: { role: true }
+      select: {
+        id: true,
+        role: true,
+      }
     })
 
     if (!dbUser) {
       return { success: false, error: 'User not found' }
     }
 
-    // Get tasks based on role
+    // Base query conditions
+    const whereConditions: Prisma.TaskWhereInput = {
+      OR: [
+        // Project-specific tasks
+        {
+          projectId: projectId || undefined,
+        },
+        // Tasks without project (only for managers)
+        ...(dbUser.role === 'MANAGER' ? [{ projectId: null }] : [])
+      ]
+    }
+
+    // Role-based filtering
+    if (dbUser.role === 'EMPLOYEE') {
+      whereConditions.assignedToId = dbUser.id
+    } else if (dbUser.role === 'TEAM_LEADER') {
+      // Team leaders can see their team members' tasks and their own tasks
+      const teamMemberIds = await db.team.findMany({
+        where: {
+          leaderId: dbUser.id
+        },
+        select: {
+          members: {
+            select: {
+              id: true
+            }
+          }
+        }
+      }).then(teams => teams.flatMap(team => team.members.map(member => member.id)))
+
+      whereConditions.OR = [
+        { assignedToId: dbUser.id },
+        { assignedToId: { in: teamMemberIds } }
+      ]
+    }
+    // Managers can see all tasks (no additional filtering needed)
+
+    // Get tasks based on role and conditions
     const tasks = await db.task.findMany({
-      where: {
-        projectId,
-        ...(dbUser.role !== 'MANAGER' && {
-          assignedToId: user.id
-        })
-      },
+      where: whereConditions,
       include: taskInclude,
       orderBy: {
         updatedAt: 'desc'
@@ -107,7 +140,10 @@ export async function updateKanbanTaskStatus(taskId: string, newStatus: string) 
     const [dbUser, task] = await Promise.all([
       db.user.findUnique({
         where: { clerkId: user.id },
-        select: { role: true }
+        select: {
+          id: true,
+          role: true,
+        }
       }),
       db.task.findUnique({
         where: { id: taskId },
@@ -124,7 +160,7 @@ export async function updateKanbanTaskStatus(taskId: string, newStatus: string) 
     }
 
     // Check authorization
-    if (dbUser.role !== 'MANAGER' && task.assignedToId !== user.id) {
+    if (dbUser.role !== 'MANAGER' && task.assignedToId !== dbUser.id) {
       return { success: false, error: 'Not authorized to update this task' }
     }
 
@@ -135,10 +171,8 @@ export async function updateKanbanTaskStatus(taskId: string, newStatus: string) 
       include: taskInclude
     })
 
-    // Revalidate all relevant paths
+    // Revalidate paths
     revalidatePath('/kanban')
-    revalidatePath('/manager/dashboard')
-    revalidatePath('/employee/dashboard')
     revalidatePath(`/projects/${task.projectId}`)
 
     return { success: true, task: updatedTask }
@@ -159,7 +193,10 @@ export async function addTaskComment(taskId: string, content: string, rating?: n
     const [dbUser, task] = await Promise.all([
       db.user.findUnique({
         where: { clerkId: user.id },
-        select: { role: true }
+        select: {
+          id: true,
+          role: true,
+        }
       }),
       db.task.findUnique({
         where: { id: taskId },
@@ -175,28 +212,31 @@ export async function addTaskComment(taskId: string, content: string, rating?: n
       return { success: false, error: 'Task not found' }
     }
 
+    if (!task.projectId) {
+      return { success: false, error: 'Task is not associated with a project' }
+    }
+
     // Check authorization
-    if (dbUser.role !== 'MANAGER' && task.assignedToId !== user.id) {
+    if (dbUser.role !== 'MANAGER' && task.assignedToId !== dbUser.id) {
       return { success: false, error: 'Not authorized to comment on this task' }
     }
 
     // Create the comment
-    const comment = await db.comment.create({
+    const comment = await db.projectComment.create({
       data: {
         content,
         rating,
-        task: {
-          connect: { id: taskId }
+        project: {
+          connect: { id: task.projectId }
         },
         user: {
-          connect: { clerkId: user.id }
+          connect: { id: dbUser.id }
         }
       },
       include: {
         user: {
           select: {
-            name: true,
-            profileImage: true
+            name: true
           }
         }
       }
@@ -204,8 +244,6 @@ export async function addTaskComment(taskId: string, content: string, rating?: n
 
     // Revalidate paths
     revalidatePath('/kanban')
-    revalidatePath('/manager/dashboard')
-    revalidatePath('/employee/dashboard')
     revalidatePath(`/projects/${task.projectId}`)
 
     return { success: true, comment }
@@ -215,7 +253,7 @@ export async function addTaskComment(taskId: string, content: string, rating?: n
   }
 }
 
-export async function updateTaskResourceUrl(taskId: string, resourceUrl: string) {
+export async function updateTaskResourceUrl(taskId: string, url: string) {
   try {
     const user = await currentUser()
     if (!user) {
@@ -226,7 +264,10 @@ export async function updateTaskResourceUrl(taskId: string, resourceUrl: string)
     const [dbUser, task] = await Promise.all([
       db.user.findUnique({
         where: { clerkId: user.id },
-        select: { role: true }
+        select: {
+          id: true,
+          role: true,
+        }
       }),
       db.task.findUnique({
         where: { id: taskId },
@@ -243,23 +284,21 @@ export async function updateTaskResourceUrl(taskId: string, resourceUrl: string)
     }
 
     // Check authorization
-    if (dbUser.role !== 'MANAGER' && task.assignedToId !== user.id) {
+    if (dbUser.role !== 'MANAGER' && task.assignedToId !== dbUser.id) {
       return { success: false, error: 'Not authorized to update this task' }
     }
 
-    // Update the task
+    // Update the task with the resource URL
     const updatedTask = await db.task.update({
       where: { id: taskId },
       data: {
-        resourceUrl
+        description: url // Store the URL in the description field since there's no dedicated resourceUrl field
       },
       include: taskInclude
     })
 
     // Revalidate paths
     revalidatePath('/kanban')
-    revalidatePath('/manager/dashboard')
-    revalidatePath('/employee/dashboard')
     revalidatePath(`/projects/${task.projectId}`)
 
     return { success: true, task: updatedTask }

@@ -2,13 +2,15 @@
 
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
+import { createTaskAssignedNotification } from '@/lib/notifications'
 
 type CreateTaskData = {
   title: string
   assignedTo: string
   priority: string
-  status: string
   projectId: string
+  description?: string
+  deadline?: Date
 }
 
 export async function createTask(data: CreateTaskData) {
@@ -16,27 +18,40 @@ export async function createTask(data: CreateTaskData) {
     const user = await currentUser()
     if (!user) throw new Error('Not authenticated')
 
-    // Get the current user's role
     const dbUser = await db.user.findUnique({
-      where: { clerkId: user.id },
-      select: { role: true }
+      where: { clerkId: user.id }
     })
 
-    if (!dbUser || (dbUser.role !== 'MANAGER' && dbUser.role !== 'TEAM_LEADER')) {
-      throw new Error('Not authorized to create tasks')
-    }
+    if (!dbUser) throw new Error('User not found')
 
-    // Create the task
     const task = await db.task.create({
       data: {
         title: data.title,
-        status: data.status,
+        description: data.description,
         priority: data.priority,
-        projectId: data.projectId,
+        status: 'ASSIGNED',
+        deadline: data.deadline,
+        creatorId: dbUser.id,
         assignedToId: data.assignedTo,
-        createdById: user.id
+        projectId: data.projectId
       }
     })
+
+    if (data.assignedTo) {
+      const assignee = await db.user.findUnique({
+        where: { id: data.assignedTo },
+        select: { clerkId: true }
+      })
+
+      if (assignee && assignee.clerkId && dbUser.name) {
+        await createTaskAssignedNotification(
+          assignee.clerkId,
+          task.title,
+          task.id,
+          dbUser.name
+        )
+      }
+    }
 
     return task
   } catch (error) {
@@ -57,8 +72,7 @@ export async function getProjectTasks(projectId: string) {
       include: {
         assignedTo: {
           select: {
-            name: true,
-            profileImage: true
+            name: true
           }
         }
       }

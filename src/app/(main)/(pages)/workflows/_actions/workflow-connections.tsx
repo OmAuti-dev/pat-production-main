@@ -172,7 +172,6 @@ export const onCreateWorkflow = async (name: string, description: string) => {
         clerkId: user.id,
         email: user.emailAddresses[0].emailAddress,
         name: `${user.firstName} ${user.lastName}`.trim(),
-        profileImage: user.imageUrl,
       },
     })
 

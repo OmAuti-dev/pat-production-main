@@ -57,7 +57,8 @@ export async function GET() {
           membersMap.set(member.user.id, {
             id: member.user.id,
             name: member.user.name || 'Unknown User',
-            profileImage: member.user.profileImage
+            email: member.user.email,
+            role: member.user.role
           })
         }
       })

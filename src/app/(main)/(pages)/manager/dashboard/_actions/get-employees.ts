@@ -18,12 +18,19 @@ export async function getEmployees() {
         id: true,
         clerkId: true,
         name: true,
-        role: true,
-        profileImage: true
+        role: true
       }
     })
 
-    return { success: true, employees }
+    // Transform employees to use database ID for task assignment
+    const transformedEmployees = employees.map(employee => ({
+      id: employee.id,  // Use database ID for task assignment
+      clerkId: employee.clerkId,
+      name: employee.name,
+      role: employee.role
+    }))
+
+    return { success: true, employees: transformedEmployees }
   } catch (error) {
     console.error('Error fetching employees:', error)
     return { success: false, error: 'Failed to fetch employees' }

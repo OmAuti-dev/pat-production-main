@@ -7,6 +7,15 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum TaskStatus {
+  ASSIGNED
+  ACCEPTED
+  DECLINED
+  PENDING
+  IN_PROGRESS
+  DONE
+}
+
 enum Role {
   ADMIN
   MANAGER
@@ -21,52 +30,35 @@ model User {
   name          String
   email         String    @unique
   role          Role      @default(EMPLOYEE)
-  profileImage  String?
   phoneNumber   String?
-  skills        String[]
+  skills        String[]  @default([])
   experience    Int       @default(0)
   resumeUrl     String?
+  tier          String?   @default("Free")
+  credits       String?   @default("10")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  googleResourceId String?
-  
-  // Task relations
-  createdTasks  Task[]    @relation("CreatedBy")
-  assignedTasks Task[]    @relation("AssignedTo")
-  
-  // Team relations
-  memberOfTeams TeamMember[]
-  leadingTeams  Team[]    @relation("TeamLead")
   
   // Project relations
   managedProjects Project[] @relation("ManagedBy")
   clientProjects  Project[] @relation("ClientOf")
+  memberProjects  Project[] @relation("ProjectMembers")
   
-  // Other fields
-  tier             String? @default("Free")
-  credits          String? @default("10")
+  // Task relations
+  createdTasks    Task[]    @relation("TaskCreator")
+  assignedTasks   Task[]    @relation("TaskAssignee")
   
-  // Workflow relation
-  workflows         Workflow[]
-}
-
-model Task {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  status      String   @default("TODO")
-  priority    String   @default("MEDIUM")
-  deadline    DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  createdBy   User     @relation("CreatedBy", fields: [creatorId], references: [id])
-  creatorId   String
-  assignedTo  User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
-  assignedToId String?
-  project     Project? @relation(fields: [projectId], references: [id])
-  projectId   String?
+  // Team relations
+  leadingTeams    Team[]    @relation("TeamLeader")
+  memberOfTeams   Team[]    @relation("TeamMembers")
+  
+  // Communication relations
+  projectComments  ProjectComment[]
+  organizedMeetings Meeting[]        @relation("MeetingOrganizer")
+  meetingAttendance MeetingAttendee[]
+  
+  // Notifications relation
+  notifications Notification[]
 }
 
 model Team {
@@ -75,66 +67,120 @@ model Team {
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
+  
   // Relations
-  leader      User     @relation("TeamLead", fields: [leaderId], references: [id])
+  leader      User     @relation("TeamLeader", fields: [leaderId], references: [id])
   leaderId    String
-  members     TeamMember[]
+  members     User[]   @relation("TeamMembers")
   projects    Project[]
-}
-
-model TeamMember {
-  id        String   @id @default(cuid())
-  joinedAt  DateTime @default(now())
-  role      String   @default("MEMBER")
-
-  // Relations
-  user      User     @relation(fields: [userId], references: [id])
-  userId    String
-  team      Team     @relation(fields: [teamId], references: [id])
-  teamId    String
-
-  @@unique([userId, teamId])
 }
 
 model Project {
   id          String   @id @default(cuid())
   name        String
   description String?
-  status      String   @default("PLANNING")
+  status      String   @default("PENDING")
   startDate   DateTime?
   endDate     DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
+  
   // Relations
   manager     User     @relation("ManagedBy", fields: [managerId], references: [id])
   managerId   String
   client      User?    @relation("ClientOf", fields: [clientId], references: [id])
   clientId    String?
+  members     User[]   @relation("ProjectMembers")
   team        Team?    @relation(fields: [teamId], references: [id])
   teamId      String?
+  
+  // Task relation
   tasks       Task[]
+  
+  // Communication relations
+  comments    ProjectComment[]
+  meetings    Meeting[]
 }
 
-model Workflow {
-  id                String    @id @default(cuid())
-  name              String
-  description       String?
-  userId            String
-  publish           Boolean   @default(false)
-  nodes             Json?
-  edges             Json?
-  discordTemplate   String?
-  slackTemplate     String?
-  slackAccessToken  String?
-  slackChannels     String[]  @default([])
-  notionTemplate    String?
-  notionAccessToken String?
-  notionDbId        String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-
+model Task {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  status        String    @default("ASSIGNED")
+  priority      String    @default("MEDIUM")
+  deadline      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  declineReason String?
+  requiredSkills String[] @default([])
+  
   // Relations
-  user              User      @relation(fields: [userId], references: [id])
+  creator      User      @relation("TaskCreator", fields: [creatorId], references: [id])
+  creatorId    String
+  assignedTo   User?     @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  assignedToId String?
+  project      Project?  @relation(fields: [projectId], references: [id])
+  projectId    String?
+}
+
+model ProjectComment {
+  id        String   @id @default(cuid())
+  content   String
+  rating    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  
+  // For notifications
+  isRead    Boolean  @default(false)
+}
+
+model Meeting {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  link        String?  // For virtual meetings
+  location    String?  // For physical meetings
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+  organizer   User     @relation("MeetingOrganizer", fields: [organizerId], references: [id])
+  organizerId String
+  attendees   MeetingAttendee[]
+}
+
+model MeetingAttendee {
+  id         String   @id @default(cuid())
+  status     String   @default("PENDING") // PENDING, ACCEPTED, DECLINED
+  meeting    Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId  String
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+
+  @@unique([meetingId, userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
 } 

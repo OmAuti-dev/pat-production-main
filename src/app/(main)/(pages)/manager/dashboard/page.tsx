@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
   Calendar,
   Activity,
   Plus,
+  Trash2,
 } from 'lucide-react'
 import {
   Select,
@@ -24,12 +25,14 @@ import {
 import { CreateTaskModal } from './_components/create-task-modal'
 import { EditTaskModal } from './_components/edit-task-modal'
 import { TasksTable } from './_components/tasks-table'
+import { ProjectMembers } from './_components/project-members'
 import { getEmployees } from './_actions/get-employees'
 import { getProjects } from './_actions/get-projects'
 import { getTasks } from './_actions/get-tasks'
 import { toast } from 'sonner'
 import { format, isValid, parseISO } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { ProjectDetailsDialog } from '@/components/projects/project-details-dialog'
 import type { 
   Employee, 
   Project, 
@@ -42,6 +45,17 @@ import { Progress } from '@/components/ui/progress'
 import { getProjectMembers, type ProjectMember } from './actions'
 import { editTask, deleteTask, unassignTask } from './_actions/task-actions'
 import { useRealTime } from '@/hooks/use-real-time'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { addEmployeeToProject } from '@/app/(main)/(pages)/projects/_actions/project'
 
 const formatDate = (dateString: string | null | undefined) => {
   try {
@@ -85,6 +99,11 @@ export default function ManagerDashboard() {
   const [selectedProject, setSelectedProject] = useState<string>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [members, setMembers] = useState<ProjectMember[]>([])
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [selectedProjectDetails, setSelectedProjectDetails] = useState<Project | null>(null)
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([])
+  const [availableEmployees, setAvailableEmployees] = useState<Employee[]>([])
   const router = useRouter()
 
   // Initialize real-time updates
@@ -97,7 +116,36 @@ export default function ManagerDashboard() {
     setMembers,
   })
 
+  // Periodic task cleanup
   useEffect(() => {
+    const cleanupTasks = async () => {
+      try {
+        const response = await fetch('/api/tasks/cleanup', {
+          method: 'POST'
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.unassignedTasks.length > 0) {
+            toast.info(`${data.unassignedTasks.length} tasks were unassigned due to deleted users`)
+          }
+        }
+      } catch (error) {
+        console.error('Error during task cleanup:', error)
+      }
+    }
+
+    // Run cleanup on component mount and every hour
+    cleanupTasks()
+    const interval = setInterval(cleanupTasks, 60 * 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // Fetch initial data
+  useEffect(() => {
+    let mounted = true
+
     const fetchData = async () => {
       try {
         const [employeesResult, projectsResult, tasksResult] = await Promise.all([
@@ -105,6 +153,8 @@ export default function ManagerDashboard() {
           getProjects(),
           getTasks()
         ]) as [GetEmployeesResponse, GetProjectsResponse, GetTasksResponse]
+
+        if (!mounted) return
 
         if (employeesResult.success && employeesResult.employees) {
           setEmployees(employeesResult.employees)
@@ -127,51 +177,75 @@ export default function ManagerDashboard() {
           toast.error(tasksResult.error || 'Failed to fetch tasks')
         }
 
-        const [initialMembers] = await Promise.all([
-          getProjectMembers()
-        ])
+        // Get initial members
+        const initialMembers = await getProjectMembers('all')
+        if (!mounted) return
+        
         setMembers(initialMembers)
-        setIsLoading(false)
       } catch (error) {
         console.error('Error fetching data:', error)
-        toast.error('Failed to fetch dashboard data')
-        setIsLoading(false)
+        if (mounted) {
+          toast.error('Failed to fetch dashboard data')
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false)
+        }
       }
     }
 
     fetchData()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
-  const handleEditTask = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId)
-    if (task) {
-      setSelectedTask(task)
-      setIsEditTaskModalOpen(true)
-    }
-  }
+  const handleEditTask = useCallback((task: Task) => {
+    setSelectedTask(task)
+    setIsEditTaskModalOpen(true)
+  }, [])
+
+  const handleCloseEditModal = useCallback(() => {
+    setIsEditTaskModalOpen(false)
+    setSelectedTask(null)
+  }, [])
 
   const handleDeleteTask = async (taskId: string) => {
     try {
-      await deleteTask(taskId)
-      setTasks(prev => prev.filter(t => t.id !== taskId))
-      toast.success('Task deleted successfully')
+      const result = await deleteTask(taskId)
+      if (result.success) {
+        setTasks(prev => prev.filter(t => t.id !== taskId))
+        toast.success('Task deleted successfully')
+      } else {
+        toast.error(result.error || 'Failed to delete task')
+      }
     } catch (error) {
+      console.error('Error deleting task:', error)
       toast.error('Failed to delete task')
     }
   }
 
   const handleUnassignTask = async (taskId: string) => {
     try {
-      await unassignTask(taskId)
-      setTasks(prev => prev.map(t => {
-        if (t.id === taskId) {
-          const { assignedTo, ...rest } = t
-          return rest
-        }
-        return t
-      }))
-      toast.success('Task unassigned successfully')
+      const result = await unassignTask(taskId)
+      if (result.success) {
+        setTasks(prev => prev.map(t => {
+          if (t.id === taskId) {
+            return {
+              ...t,
+              assignedTo: undefined,
+              assignedToId: null
+            }
+          }
+          return t
+        }))
+        toast.success('Task unassigned successfully')
+      } else {
+        toast.error(result.error || 'Failed to unassign task')
+      }
     } catch (error) {
+      console.error('Error unassigning task:', error)
       toast.error('Failed to unassign task')
     }
   }
@@ -241,192 +315,192 @@ export default function ManagerDashboard() {
     setMembers(updatedMembers)
   }
 
+  const handleDeleteSelectedTasks = () => {
+    if (selectedTasks.size === 0) {
+      toast.error('No tasks selected')
+      return
+    }
+    setIsDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = () => {
+    selectedTasks.forEach(taskId => handleDeleteTask(taskId))
+    setSelectedTasks(new Set())
+    setIsDeleteDialogOpen(false)
+  }
+
+  const handleShowProjectDetails = async (project: Project) => {
+    setSelectedProjectDetails(project)
+    if (project.id) {
+      try {
+        // Fetch project members and available employees in parallel
+        const [members, employeesRes] = await Promise.all([
+          getProjectMembers(project.id),
+          getEmployees()
+        ])
+
+        setProjectMembers(members)
+        
+        if (employeesRes.success && employeesRes.employees) {
+          // Filter out employees who are already members
+          const availableEmps = employeesRes.employees.filter(
+            emp => !members.some(member => member.clerkId === emp.clerkId)
+          )
+          setAvailableEmployees(availableEmps)
+        }
+      } catch (error) {
+        console.error('Error fetching project details:', error)
+        toast.error('Failed to load project details')
+      }
+    }
+  }
+
+  const handleAddMember = async (employeeClerkId: string) => {
+    try {
+      if (!selectedProjectDetails) {
+        toast.error('No project selected')
+        return
+      }
+
+      await addEmployeeToProject(selectedProjectDetails.id, employeeClerkId)
+
+      // Refresh project members and available employees
+      const [updatedMembers, employeesRes] = await Promise.all([
+        getProjectMembers(selectedProjectDetails.id),
+        getEmployees()
+      ])
+
+      setProjectMembers(updatedMembers)
+      
+      if (employeesRes.success && employeesRes.employees) {
+        // Filter out employees who are already members
+        const availableEmps = employeesRes.employees.filter(
+          emp => !updatedMembers.some(member => member.clerkId === emp.clerkId)
+        )
+        setAvailableEmployees(availableEmps)
+      }
+
+      toast.success('Project member added successfully')
+    } catch (error) {
+      console.error('Error adding project member:', error)
+      if (error instanceof Error) {
+        toast.error(error.message)
+      } else {
+        toast.error('Failed to add project member')
+      }
+    }
+  }
+
+  const handleUpdateProject = async (data: {
+    name: string
+    description: string | null
+    status: string
+    startDate: Date | null
+    endDate: Date | null
+  }) => {
+    // This is a placeholder - you'll need to implement the actual project update functionality
+    toast.error('Project update functionality not implemented yet')
+  }
+
   if (isLoading) {
     return <div>Loading...</div>
   }
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="grid gap-4 md:grid-cols-3">
-        {stats.map((stat, index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-sm text-muted-foreground">{stat.description}</p>
-            </CardContent>
-          </Card>
-        ))}
+    <div className="container mx-auto py-10">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <Button onClick={() => setIsCreateTaskModalOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Task
+        </Button>
       </div>
 
-      {/* Project Progress and Team Members in one row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Stats Cards */}
+      <div className="grid gap-6 grid-cols-1 md:grid-cols-3 mb-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Tasks</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{tasks.length}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {tasks.filter(t => t.status === 'DONE').length} completed
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Due Today</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{tasks.filter(isTaskDueToday).length}</div>
+            <p className="text-xs text-muted-foreground mt-1">Tasks due today</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Overdue</CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{tasks.filter(isTaskOverdue).length}</div>
+            <p className="text-xs text-muted-foreground mt-1">Tasks past deadline</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Project Progress and Members */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Project Progress */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FolderGit2 className="h-5 w-5" />
-              Project Progress
-            </CardTitle>
+            <CardTitle>Project Progress</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {projects.map((project) => {
-                const progress = calculateProjectProgress(project.id)
-                const teamMembers = project.team?.members || []
-                return (
-                  <div key={project.id} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">{project.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {teamMembers.length} team members
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex -space-x-2">
-                          {teamMembers.slice(0, 3).map((member) => (
-                            <Avatar key={member.user.clerkId} className="border-2 border-background">
-                              <AvatarImage src={member.user.profileImage || ""} />
-                              <AvatarFallback>
-                                {member.user.name?.charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                          ))}
-                          {teamMembers.length > 3 && (
-                            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm">
-                              +{teamMembers.length - 3}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <Progress value={progress} className="h-2" />
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>{progress}% complete</span>
-                      <span>{project.status}</span>
-                    </div>
+          <CardContent className="space-y-4">
+            {projects.map((project) => (
+              <div 
+                key={project.id} 
+                className="space-y-2 cursor-pointer hover:bg-muted/50 p-4 rounded-lg transition-colors"
+                onClick={() => handleShowProjectDetails(project)}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium">{project.name}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {tasks.filter(t => t.projectId === project.id && t.assignedToId).length} team members
+                    </p>
                   </div>
-                )
-              })}
-            </div>
+                  <span className="text-sm text-muted-foreground">
+                    {calculateProjectProgress(project.id)}% complete
+                  </span>
+                </div>
+                <Progress value={calculateProjectProgress(project.id)} className="h-2" />
+                <p className="text-sm text-muted-foreground text-right">
+                  {project.status}
+                </p>
+              </div>
+            ))}
           </CardContent>
         </Card>
 
         {/* Project Members */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Project Members
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <Select value={selectedProject} onValueChange={handleProjectChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all-projects">All Projects</SelectItem>
-                  {projects.map((project) => (
-                    project.id ? (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ) : null
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <div className="space-y-4">
-                {selectedProject === 'all-projects' ? (
-                  // Show all unique members across all projects
-                  projects.flatMap(project => project.team?.members || [])
-                    .filter((member, index, self) => 
-                      index === self.findIndex(m => m.user.clerkId === member.user.clerkId)
-                    )
-                    .map((member) => {
-                      const assignedTasks = member.user.assignedTasks.length
-                      const completedTasks = member.user.assignedTasks.filter(task => task.status === 'DONE').length
-                      return (
-                        <div
-                          key={member.user.clerkId}
-                          className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Avatar>
-                              <AvatarImage src={member.user.profileImage || ""} />
-                              <AvatarFallback>
-                                {member.user.name?.charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{member.user.name}</p>
-                              <p className="text-sm text-muted-foreground">{member.user.role}</p>
-                            </div>
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            <p>{completedTasks}/{assignedTasks} tasks</p>
-                          </div>
-                        </div>
-                      )
-                    })
-                ) : (
-                  // Show members of the selected project
-                  projects.find(p => p.id === selectedProject)?.team?.members.map((member) => {
-                    const assignedTasks = member.user.assignedTasks.length
-                    const completedTasks = member.user.assignedTasks.filter(task => task.status === 'DONE').length
-                    return (
-                      <div
-                        key={member.user.clerkId}
-                        className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Avatar>
-                            <AvatarImage src={member.user.profileImage || ""} />
-                            <AvatarFallback>
-                              {member.user.name?.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-medium">{member.user.name}</p>
-                            <p className="text-sm text-muted-foreground">{member.user.role}</p>
-                          </div>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          <p>{completedTasks}/{assignedTasks} tasks</p>
-                        </div>
-                      </div>
-                    )
-                  }) || (
-                    <div className="text-center text-muted-foreground">
-                      No members in this project
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ProjectMembers members={members} />
       </div>
 
       {/* Tasks Table */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Tasks
-          </CardTitle>
-          <div className="flex items-center gap-4">
-            <Select value={selectedProject} onValueChange={handleProjectChange}>
+          <CardTitle>Tasks</CardTitle>
+          <div className="flex items-center gap-2">
+            <Select
+              value={selectedProject}
+              onValueChange={handleProjectChange}
+            >
               <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by project" />
+                <SelectValue placeholder="Select project" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Projects</SelectItem>
@@ -437,10 +511,17 @@ export default function ManagerDashboard() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={() => setIsCreateTaskModalOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Create Task
-            </Button>
+            {selectedProject && selectedProject !== 'all' && selectedTasks.size > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDeleteSelectedTasks}
+                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-100"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="sr-only">Delete selected tasks</span>
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -449,10 +530,13 @@ export default function ManagerDashboard() {
             onEdit={handleEditTask}
             onDelete={handleDeleteTask}
             onUnassign={handleUnassignTask}
+            selectedProject={selectedProject}
+            onSelectedTasksChange={setSelectedTasks}
           />
         </CardContent>
       </Card>
 
+      {/* Modals */}
       <CreateTaskModal
         isOpen={isCreateTaskModalOpen}
         onClose={() => setIsCreateTaskModalOpen(false)}
@@ -463,13 +547,55 @@ export default function ManagerDashboard() {
       {selectedTask && (
         <EditTaskModal
           isOpen={isEditTaskModalOpen}
-          onClose={() => {
-            setIsEditTaskModalOpen(false)
-            setSelectedTask(null)
-          }}
+          onClose={handleCloseEditModal}
           task={selectedTask}
           employees={employees}
           projects={projects}
+        />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Selected Tasks</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedTasks.size} selected task(s)? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {selectedProjectDetails && (
+        <ProjectDetailsDialog
+          project={{
+            ...selectedProjectDetails,
+            client: { name: null },
+            startDate: null,
+            endDate: null,
+          }}
+          members={projectMembers.map(member => ({
+            clerkId: member.clerkId,
+            name: member.name,
+            role: member.role,
+            assignedTasks: member.assignedTasks,
+            completedTasks: member.completedTasks
+          }))}
+          availableEmployees={availableEmployees.map(emp => ({
+            clerkId: emp.clerkId,
+            name: emp.name
+          }))}
+          userRole="MANAGER"
+          isOpen={!!selectedProjectDetails}
+          onClose={() => setSelectedProjectDetails(null)}
+          onAddMember={handleAddMember}
+          onUpdateProject={handleUpdateProject}
         />
       )}
     </div>

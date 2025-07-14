@@ -3,16 +3,23 @@
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
 import { revalidatePath } from 'next/cache'
-import { triggerTaskUpdate } from './real-time'
+import { triggerTaskUpdate, triggerTaskDelete } from './real-time'
+import { createTaskAssignedNotification, createTaskRescheduledNotification } from '@/lib/notifications'
+import { pusherServer } from '@/lib/pusher'
+import { CHANNELS, EVENTS } from '@/lib/pusher'
+
+export type TaskStatus = 'ASSIGNED' | 'ACCEPTED' | 'DECLINED' | 'PENDING' | 'IN_PROGRESS' | 'DONE'
 
 interface EditTaskData {
   id: string
-  title?: string
-  status?: string
-  priority?: string
-  deadline?: Date | null
-  assignedToId?: string | null
-  projectId?: string | null
+  title: string
+  description: string
+  status: TaskStatus
+  priority: 'LOW' | 'MEDIUM' | 'HIGH'
+  deadline: Date | null
+  assignedToId: string | null
+  projectId: string | null
+  requiredSkills: string[]
 }
 
 export async function editTask(data: EditTaskData) {
@@ -22,7 +29,6 @@ export async function editTask(data: EditTaskData) {
       return { success: false, error: 'Not authenticated' }
     }
 
-    // Get user's internal database ID
     const dbUser = await db.user.findUnique({
       where: { clerkId: user.id },
       select: { id: true, role: true }
@@ -32,54 +38,23 @@ export async function editTask(data: EditTaskData) {
       return { success: false, error: 'Not authorized to edit tasks' }
     }
 
-    // Validate task exists
-    const task = await db.task.findUnique({
-      where: { id: data.id }
-    })
-
-    if (!task) {
-      return { success: false, error: 'Task not found' }
-    }
-
-    // If changing project, validate project exists
-    if (data.projectId) {
-      const project = await db.project.findUnique({
-        where: { id: data.projectId }
-      })
-
-      if (!project) {
-        return { success: false, error: 'Project not found' }
-      }
-    }
-
-    // If changing assignee, validate assignee exists
-    let assigneeId: string | undefined | null = undefined
-    if (data.assignedToId !== undefined) {
-      if (data.assignedToId === null) {
-        assigneeId = null
-      } else {
-        // We're now using the database ID directly since that's what we're passing from the frontend
-        assigneeId = data.assignedToId
-      }
-    }
-
-    // Update the task
-    const updatedTask = await db.task.update({
+    const task = await db.task.update({
       where: { id: data.id },
       data: {
         title: data.title,
+        description: data.description,
         status: data.status,
         priority: data.priority,
         deadline: data.deadline,
-        assignedToId: assigneeId,
-        projectId: data.projectId
+        assignedToId: data.assignedToId,
+        projectId: data.projectId,
+        requiredSkills: data.requiredSkills
       },
       include: {
         assignedTo: {
           select: {
             id: true,
             name: true,
-            profileImage: true,
             role: true
           }
         },
@@ -94,33 +69,18 @@ export async function editTask(data: EditTaskData) {
 
     // Transform task to match interface
     const transformedTask = {
-      id: updatedTask.id,
-      title: updatedTask.title,
-      description: updatedTask.description,
-      status: updatedTask.status,
-      priority: updatedTask.priority,
-      deadline: updatedTask.deadline,
-      createdAt: updatedTask.createdAt,
-      updatedAt: updatedTask.updatedAt,
-      creatorId: updatedTask.creatorId,
-      assignedToId: updatedTask.assignedToId,
-      projectId: updatedTask.projectId,
-      assignedTo: updatedTask.assignedTo ? {
-        id: updatedTask.assignedTo.id,
-        name: updatedTask.assignedTo.name,
-        profileImage: updatedTask.assignedTo.profileImage,
-        role: updatedTask.assignedTo.role
-      } : undefined,
-      project: updatedTask.project ? {
-        id: updatedTask.project.id,
-        name: updatedTask.project.name
-      } : undefined
+      ...task,
+      status: task.status as TaskStatus,
+      deadline: task.deadline?.toISOString(),
+      createdAt: task.createdAt.toISOString(),
+      updatedAt: task.updatedAt.toISOString()
     }
 
     // Trigger real-time update
-    await triggerTaskUpdate(data.id, transformedTask)
+    await pusherServer.trigger(CHANNELS.TASKS, EVENTS.TASK_UPDATED, {
+      task: transformedTask
+    })
 
-    // Revalidate paths
     revalidatePath('/manager/dashboard')
     revalidatePath('/employee/dashboard')
     if (data.projectId) {
@@ -168,8 +128,9 @@ export async function deleteTask(taskId: string) {
       where: { id: taskId }
     })
 
-    revalidatePath('/manager/dashboard')
-    revalidatePath('/employee/dashboard')
+    // Revalidate only the manager dashboard path
+    revalidatePath('/manager/dashboard', 'page')
+    
     return { success: true }
   } catch (error) {
     console.error('Error deleting task:', error)
@@ -217,7 +178,6 @@ export async function unassignTask(taskId: string) {
           select: {
             id: true,
             name: true,
-            profileImage: true,
             role: true
           }
         },
@@ -230,33 +190,81 @@ export async function unassignTask(taskId: string) {
       }
     })
 
-    // Transform task to match interface
-    const transformedTask = {
-      id: updatedTask.id,
-      title: updatedTask.title,
-      description: updatedTask.description,
-      status: updatedTask.status,
-      priority: updatedTask.priority,
-      deadline: updatedTask.deadline,
-      createdAt: updatedTask.createdAt,
-      updatedAt: updatedTask.updatedAt,
-      creatorId: updatedTask.creatorId,
-      assignedToId: updatedTask.assignedToId,
-      projectId: updatedTask.projectId,
-      assignedTo: updatedTask.assignedTo ? {
-        id: updatedTask.assignedTo.id,
-        name: updatedTask.assignedTo.name,
-        profileImage: updatedTask.assignedTo.profileImage,
-        role: updatedTask.assignedTo.role
-      } : undefined,
-      project: updatedTask.project ? {
-        id: updatedTask.project.id,
-        name: updatedTask.project.name
-      } : undefined
+    // Trigger real-time update
+    await triggerTaskUpdate(taskId, updatedTask)
+
+    // Revalidate only the manager dashboard path
+    revalidatePath('/manager/dashboard', 'page')
+
+    return { success: true, task: updatedTask }
+  } catch (error) {
+    console.error('Error unassigning task:', error)
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Failed to unassign task'
+    }
+  }
+}
+
+export async function startTask(taskId: string) {
+  try {
+    const user = await currentUser()
+    if (!user) {
+      return { success: false, error: 'Not authenticated' }
     }
 
+    // Get user's internal database ID and role
+    const dbUser = await db.user.findUnique({
+      where: { clerkId: user.id },
+      select: { id: true, role: true }
+    })
+
+    if (!dbUser) {
+      return { success: false, error: 'User not found' }
+    }
+
+    // Validate task exists and user is assigned to it
+    const task = await db.task.findFirst({
+      where: {
+        id: taskId,
+        OR: [
+          { assignedToId: dbUser.id },
+          { creatorId: dbUser.id }
+        ]
+      }
+    })
+
+    if (!task) {
+      return { success: false, error: 'Task not found or not authorized' }
+    }
+
+    if (task.status !== 'PENDING') {
+      return { success: false, error: 'Task is not in pending status' }
+    }
+
+    // Update the task status to IN_PROGRESS
+    const updatedTask = await db.task.update({
+      where: { id: taskId },
+      data: { status: 'IN_PROGRESS' as TaskStatus },
+      include: {
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            role: true
+          }
+        },
+        project: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    })
+
     // Trigger real-time update
-    await triggerTaskUpdate(taskId, transformedTask)
+    await triggerTaskUpdate(taskId, updatedTask)
 
     // Revalidate paths
     revalidatePath('/manager/dashboard')
@@ -265,12 +273,65 @@ export async function unassignTask(taskId: string) {
       revalidatePath(`/projects/${updatedTask.projectId}`)
     }
 
-    return { success: true, task: transformedTask }
+    return { success: true, task: updatedTask }
   } catch (error) {
-    console.error('Error unassigning task:', error)
+    console.error('Error starting task:', error)
     return { 
       success: false, 
-      error: error instanceof Error ? error.message : 'Failed to unassign task'
+      error: error instanceof Error ? error.message : 'Failed to start task'
     }
+  }
+}
+
+export async function unassignTaskIfUserNotExists(taskId: string) {
+  try {
+    const task = await db.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignedTo: true
+      }
+    })
+
+    if (!task) {
+      throw new Error('Task not found')
+    }
+
+    // If task has no assignee, nothing to do
+    if (!task.assignedToId) {
+      return { success: true }
+    }
+
+    // Check if assigned user exists
+    const userExists = await db.user.findUnique({
+      where: { id: task.assignedToId }
+    })
+
+    // If user doesn't exist, unassign the task
+    if (!userExists) {
+      const updatedTask = await db.task.update({
+        where: { id: taskId },
+        data: {
+          assignedToId: null,
+          status: 'PENDING' // Reset status since no one is assigned
+        }
+      })
+
+      // Trigger real-time update
+      await triggerTaskUpdate(updatedTask)
+
+      // Revalidate paths
+      revalidatePath('/manager/dashboard')
+      revalidatePath('/employee/dashboard')
+      if (task.projectId) {
+        revalidatePath(`/projects/${task.projectId}`)
+      }
+
+      return { success: true, unassigned: true }
+    }
+
+    return { success: true, unassigned: false }
+  } catch (error) {
+    console.error('Error checking task assignment:', error)
+    return { success: false, error: 'Failed to check task assignment' }
   }
 } 

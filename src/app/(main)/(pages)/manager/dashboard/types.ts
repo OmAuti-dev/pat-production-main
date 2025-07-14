@@ -5,7 +5,6 @@ export interface Employee {
   id: string
   clerkId: string
   name: string | null
-  profileImage: string | null
   role: Role
 }
 
@@ -16,22 +15,6 @@ export interface Project extends BaseProject {
   description: string | null
   startDate: Date | null
   endDate: Date | null
-  team?: {
-    id: string
-    name: string
-    members: Array<{
-      user: {
-        clerkId: string
-        name: string | null
-        profileImage: string | null
-        role: string
-        assignedTasks: Array<{
-          id: string
-          status: string
-        }>
-      }
-    }>
-  }
   progress: number
 }
 
@@ -39,7 +22,7 @@ export interface Task extends BaseTask {
   id: string
   title: string
   description: string | null
-  status: 'TODO' | 'IN_PROGRESS' | 'DONE'
+  status: 'PENDING' | 'IN_PROGRESS' | 'DONE'
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
   deadline: Date | null
   createdAt: Date
@@ -50,7 +33,6 @@ export interface Task extends BaseTask {
   assignedTo?: {
     id: string
     name: string | null
-    profileImage: string | null
     role: string
   }
   project?: {
@@ -92,7 +74,6 @@ export type TaskWithRelations = {
   dueDate?: string
   assignedTo: {
     name: string | null
-    profileImage: string | null
   }
   Project: {
     name: string
@@ -102,15 +83,6 @@ export type TaskWithRelations = {
 export interface DashboardData {
   projects: Project[]
   tasks: Task[]
-  campaigns: Array<{
-    id: string
-    name: string
-    date: Date
-    openRate: number
-    clickRate: number
-    recipients: number
-    growth: number
-  }>
   projectStats: {
     total: number
     completed: number

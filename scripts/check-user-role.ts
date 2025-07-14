@@ -36,4 +36,6 @@ if (!clerkId) {
   process.exit(1)
 }
 
-checkUserRole(clerkId) 
+checkUserRole(clerkId)
+
+export {} 

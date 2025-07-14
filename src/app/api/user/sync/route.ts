@@ -23,13 +23,11 @@ export async function POST() {
         clerkId: user.id,
         email: user.emailAddresses[0]?.emailAddress || '',
         name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        profileImage: user.imageUrl,
         role: 'CLIENT' // Default role for new users
       },
       update: {
         email: user.emailAddresses[0]?.emailAddress || '',
-        name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        profileImage: user.imageUrl
+        name: `${user.firstName || ''} ${user.lastName || ''}`.trim()
       }
     })
 

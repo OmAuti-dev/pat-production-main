@@ -87,9 +87,14 @@ const Footer = () => {
 
         <div className="mt-8 border-t pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} PAT. All rights reserved.
-            </p>
+            <div className="flex flex-col items-center md:items-start gap-2">
+              <p className="text-sm text-muted-foreground">
+                © {new Date().getFullYear()} PAT. All rights reserved.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Sponsored by <span className="font-semibold text-primary">Architecture Harmony</span>
+              </p>
+            </div>
             <div className="flex space-x-4 text-sm">
               <Link href="/privacy" className="text-muted-foreground hover:text-primary">
                 Privacy Policy

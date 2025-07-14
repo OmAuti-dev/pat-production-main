@@ -1,4 +1,5 @@
 import { HeroSection } from '@/components/global/hero-section'
+import { FeaturesSection } from '@/components/global/features-section'
 import Navbar from '@/components/global/navbar'
 import Footer from '@/components/global/footer'
 import { currentUser } from '@clerk/nextjs'
@@ -21,6 +22,7 @@ export default async function RootPage() {
       <Navbar />
       <div className="flex-1">
         <HeroSection isAuthenticated={!!user} userRole={userRole} />
+        <FeaturesSection />
       </div>
       <Footer />
     </main>

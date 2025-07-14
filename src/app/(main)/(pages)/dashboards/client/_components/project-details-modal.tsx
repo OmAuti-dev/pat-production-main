@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { addProjectComment, getProjectComments, type Comment } from '../actions'
 import { useEffect } from 'react'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Star, StarIcon } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
@@ -22,16 +21,6 @@ interface ProjectDetailsModalProps {
     status: string
     startDate: Date | null
     endDate: Date | null
-    team: {
-      members: {
-        user: {
-          id: string
-          name: string | null
-          profileImage: string | null
-          role: string
-        }
-      }[]
-    } | null
     tasks: {
       id: string
       status: string
@@ -104,8 +93,10 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <h4 className="text-sm font-medium text-foreground">Team Members</h4>
-                <p className="text-sm text-muted-foreground">{project.team?.members.length || 0} members</p>
+                <h4 className="text-sm font-medium text-foreground">Tasks</h4>
+                <p className="text-sm text-muted-foreground">
+                  {project.tasks.filter(t => t.status === 'DONE').length} / {project.tasks.length} completed
+                </p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-foreground">Status</h4>
@@ -134,29 +125,6 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
               </div>
             </div>
           </div>
-
-          {/* Team Members Section */}
-          {project.team?.members.length ? (
-            <div className="space-y-4">
-              <h3 className="font-semibold text-foreground">Team Members</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {project.team.members.map((member) => (
-                  <div key={member.user.id} className="flex items-center gap-3 p-3 rounded-lg border dark:border-gray-800">
-                    <Avatar>
-                      <AvatarImage src={member.user.profileImage || undefined} />
-                      <AvatarFallback>
-                        {member.user.name?.[0] || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-foreground">{member.user.name || 'Unnamed'}</p>
-                      <p className="text-sm text-muted-foreground">{member.user.role}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
 
           {/* Comments Section */}
           <div className="space-y-4">
@@ -201,34 +169,23 @@ export function ProjectDetailsModal({ isOpen, onClose, project }: ProjectDetails
                 <div className="text-center text-muted-foreground">Loading comments...</div>
               ) : comments.length > 0 ? (
                 comments.map((comment) => (
-                  <div key={comment.id} className="flex gap-4 p-4 rounded-lg border dark:border-gray-800 bg-card">
-                    <Avatar>
-                      <AvatarImage src={comment.user.profileImage || undefined} />
-                      <AvatarFallback>
-                        {comment.user.name?.[0] || 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-foreground">{comment.user.name || 'Anonymous'}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {format(new Date(comment.createdAt), 'MMM d, yyyy')}
-                          </p>
-                        </div>
-                        {comment.rating && (
-                          <div className="flex items-center gap-1">
-                            {Array.from({ length: comment.rating }).map((_, i) => (
-                              <StarIcon
-                                key={i}
-                                className="h-4 w-4 fill-yellow-400 text-yellow-400"
-                              />
-                            ))}
-                          </div>
-                        )}
+                  <div key={comment.id} className="p-4 rounded-lg border dark:border-gray-800">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-medium text-foreground">{comment.user.name || 'Anonymous'}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {format(new Date(comment.createdAt), 'MMM d, yyyy')}
+                        </p>
                       </div>
-                      <p className="mt-2 text-sm text-foreground">{comment.content}</p>
+                      {comment.rating && (
+                        <div className="flex items-center gap-1">
+                          {[...Array(comment.rating)].map((_, i) => (
+                            <StarIcon key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                          ))}
+                        </div>
+                      )}
                     </div>
+                    <p className="mt-2 text-foreground">{comment.content}</p>
                   </div>
                 ))
               ) : (

@@ -25,10 +25,7 @@ export async function GET() {
         assignedToId: {
           equals: undefined
         },
-        OR: [
-          { status: 'TODO' },
-          { status: 'PENDING' }
-        ]
+        status: 'PENDING'
       },
       select: {
         id: true,

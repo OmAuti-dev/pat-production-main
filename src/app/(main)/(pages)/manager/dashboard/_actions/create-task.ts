@@ -3,14 +3,17 @@
 import { db } from '@/lib/db'
 import { currentUser } from '@clerk/nextjs'
 import { revalidatePath } from 'next/cache'
-import { triggerTaskCreate } from './real-time'
+import { triggerTaskCreate, type TaskStatus } from './real-time'
+import { createTaskAssignedNotification } from '@/lib/notifications'
 
 interface CreateTaskData {
   title: string
+  description: string
   priority: 'LOW' | 'MEDIUM' | 'HIGH'
   deadline: Date | null
   assignedToId: string | null
   projectId: string | null
+  requiredSkills: string[]
 }
 
 export async function createTask(data: CreateTaskData) {
@@ -34,7 +37,7 @@ export async function createTask(data: CreateTaskData) {
     let assigneeId: string | null = null
     if (data.assignedToId) {
       const assignee = await db.user.findUnique({
-        where: { clerkId: data.assignedToId },
+        where: { id: data.assignedToId },
         select: { id: true }
       })
 
@@ -48,19 +51,20 @@ export async function createTask(data: CreateTaskData) {
     const task = await db.task.create({
       data: {
         title: data.title,
+        description: data.description,
         priority: data.priority,
-        status: 'TODO',
+        status: 'ASSIGNED',
         deadline: data.deadline,
         assignedToId: assigneeId,
         creatorId: dbUser.id,
-        projectId: data.projectId
+        projectId: data.projectId,
+        requiredSkills: data.requiredSkills
       },
       include: {
         assignedTo: {
           select: {
             id: true,
             name: true,
-            profileImage: true,
             role: true
           }
         },
@@ -73,12 +77,33 @@ export async function createTask(data: CreateTaskData) {
       }
     })
 
+    if (assigneeId) {
+      const assignee = await db.user.findUnique({
+        where: { id: assigneeId },
+        select: { clerkId: true }
+      })
+
+      const assigner = await db.user.findUnique({
+        where: { clerkId: user.id },
+        select: { name: true }
+      })
+
+      if (assignee && assignee.clerkId && assigner) {
+        await createTaskAssignedNotification(
+          assignee.clerkId,
+          task.title,
+          task.id,
+          assigner.name || 'A manager'
+        )
+      }
+    }
+
     // Transform task to match interface
     const transformedTask = {
       id: task.id,
       title: task.title,
       description: task.description,
-      status: task.status,
+      status: task.status as TaskStatus,
       priority: task.priority,
       deadline: task.deadline,
       createdAt: task.createdAt,
@@ -86,10 +111,10 @@ export async function createTask(data: CreateTaskData) {
       creatorId: task.creatorId,
       assignedToId: task.assignedToId,
       projectId: task.projectId,
+      requiredSkills: task.requiredSkills,
       assignedTo: task.assignedTo ? {
         id: task.assignedTo.id,
         name: task.assignedTo.name,
-        profileImage: task.assignedTo.profileImage,
         role: task.assignedTo.role
       } : undefined,
       project: task.project ? {

@@ -21,6 +21,7 @@ export const CHANNELS = {
   PROJECTS: 'projects',
   TASKS: 'tasks',
   MEMBERS: 'members',
+  NOTIFICATIONS: 'notifications',
 } as const
 
 // Event types
@@ -39,4 +40,6 @@ export const EVENTS = {
   MEMBER_ADDED: 'member-added',
   MEMBER_REMOVED: 'member-removed',
   MEMBER_ROLE_UPDATED: 'member-role-updated',
+
+  NEW_NOTIFICATION: 'new-notification',
 } as const 

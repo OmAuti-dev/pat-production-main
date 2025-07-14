@@ -40,12 +40,11 @@ interface AssignTaskModalProps {
   isOpen: boolean
   onClose: () => void
   onAssign: (taskId: string, userId: string, deadline: string, priority: string) => Promise<void>
-  taskId: string
+  teamMembers: TeamMember[]
 }
 
-export function AssignTaskModal({ isOpen, onClose, onAssign, taskId }: AssignTaskModalProps) {
+export function AssignTaskModal({ isOpen, onClose, onAssign, teamMembers }: AssignTaskModalProps) {
   const [tasks, setTasks] = useState<Task[]>([])
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [selectedTask, setSelectedTask] = useState<string>('')
   const [selectedMember, setSelectedMember] = useState<string>('')
   const [deadline, setDeadline] = useState<string>('')
@@ -56,7 +55,6 @@ export function AssignTaskModal({ isOpen, onClose, onAssign, taskId }: AssignTas
 
   useEffect(() => {
     fetchTasks()
-    fetchTeamMembers()
   }, [])
 
   const fetchTasks = async () => {
@@ -66,16 +64,6 @@ export function AssignTaskModal({ isOpen, onClose, onAssign, taskId }: AssignTas
       setTasks(data)
     } catch (error) {
       console.error('Error fetching tasks:', error)
-    }
-  }
-
-  const fetchTeamMembers = async () => {
-    try {
-      const response = await fetch('/api/team-leader/members')
-      const data = await response.json()
-      setTeamMembers(data)
-    } catch (error) {
-      console.error('Error fetching team members:', error)
     }
   }
 
@@ -91,7 +79,7 @@ export function AssignTaskModal({ isOpen, onClose, onAssign, taskId }: AssignTas
 
     try {
       setIsLoading(true)
-      await onAssign(taskId, selectedMember, deadline, priority)
+      await onAssign(selectedTask, selectedMember, deadline, priority)
       toast.success('Task assigned successfully')
       onClose()
     } catch (error) {
@@ -132,7 +120,7 @@ export function AssignTaskModal({ isOpen, onClose, onAssign, taskId }: AssignTas
                   <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[400px] p-0">
+              <PopoverContent className="w-[300px] p-0">
                 <Command>
                   <CommandInput
                     placeholder="Search tasks..."

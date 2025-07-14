@@ -1,12 +1,15 @@
 'use server'
 
 import { pusherServer, CHANNELS, EVENTS } from '@/lib/pusher'
+import { Role } from '@prisma/client'
+
+export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE'
 
 interface Task {
   id: string
   title: string
   description: string | null
-  status: string
+  status: TaskStatus
   priority: string
   deadline: Date | null
   createdAt: Date
@@ -17,8 +20,7 @@ interface Task {
   assignedTo?: {
     id: string
     name: string | null
-    profileImage: string | null
-    role: string
+    role: Role
   }
   project?: {
     id: string
@@ -38,23 +40,29 @@ interface Project {
 interface ProjectMember {
   id: string
   name: string | null
-  profileImage: string | null
-  role: string
+  role: Role
   assignedTasks: number
   completedTasks: number
 }
 
 // Project updates
-export async function triggerProjectUpdate(projectId: string, updates: Partial<Project>) {
-  await pusherServer.trigger(CHANNELS.PROJECTS, EVENTS.PROJECT_UPDATED, {
+export async function triggerProjectMembersUpdate(projectId: string, members: ProjectMember[]) {
+  await pusherServer.trigger(CHANNELS.PROJECTS, EVENTS.PROJECT_MEMBERS_UPDATED, {
     projectId,
-    updates,
+    members,
   })
 }
 
 export async function triggerProjectCreate(project: Project) {
   await pusherServer.trigger(CHANNELS.PROJECTS, EVENTS.PROJECT_CREATED, {
     project,
+  })
+}
+
+export async function triggerProjectUpdate(projectId: string, updates: Partial<Project>) {
+  await pusherServer.trigger(CHANNELS.PROJECTS, EVENTS.PROJECT_UPDATED, {
+    projectId,
+    updates,
   })
 }
 
